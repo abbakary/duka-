@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Bell, MessageCircle, Send, Smartphone } from 'lucide-react';
 import { Language, PlatformBroadcast, TenantStore } from '@/types/v1';
 import { derivePaymentStatus, paymentStatusLabel } from '@/lib/saasPlans';
+import { usePlatformBilling } from '@/context/PlatformBillingContext';
+import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
 import { api } from '@/lib/api';
 import { mapBroadcast } from '@/lib/apiSync';
 
@@ -21,13 +23,14 @@ export const SuperAdminRemindersView: React.FC<Props> = ({
   tenants = [],
 }) => {
   const isSw = language === 'sw';
+  const { settings: billing } = usePlatformBilling();
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [channel, setChannel] = useState<ReminderChannel>('both');
   const [target, setTarget] = useState<'all' | 'unpaid'>('unpaid');
 
   const unpaidTenants = tenants.filter(t => {
-    const ps = derivePaymentStatus(t.subscriptionExpiry, t.status);
+    const ps = derivePaymentStatus(t.subscriptionExpiry, t.status, billing.graceDays);
     return ps === 'unpaid' || ps === 'overdue' || ps === 'grace';
   });
 
@@ -61,19 +64,21 @@ export const SuperAdminRemindersView: React.FC<Props> = ({
   };
 
   const quickTemplate = (type: 'payment' | 'expiry') => {
+    const lipa = `${billing.lipaNumber} (${billing.lipaName})`;
+    const wa = billing.whatsappNumber;
     if (type === 'payment') {
       setTitle(isSw ? 'Kumbusho la malipo' : 'Payment reminder');
       setMessage(
         isSw
-          ? 'Habari! Usajili wako wa Duka+ unakaribia kuisha. Lipa kwa M-Pesa ili kuendelea kutumia huduma.'
-          : 'Your Duka+ subscription is due. Pay via M-Pesa to continue using the service.',
+          ? `Habari! Usajili wako wa Duka+ unahitaji malipo. Lipia Lipa namba ${lipa}, kisha thibitisha WhatsApp ${wa} kwa jina la biashara + kumbukumbu ya M-Pesa.`
+          : `Your Duka+ subscription needs payment. Pay Lipa number ${lipa}, then confirm on WhatsApp ${wa} with your business name + M-Pesa reference.`,
       );
     } else {
       setTitle(isSw ? 'Usajili unaisha' : 'Subscription expiring');
       setMessage(
         isSw
-          ? 'Usajili wako unaisha ndani ya siku 7. Tafadhali lipia ili kuepuka kusitishwa kwa huduma.'
-          : 'Your plan expires in 7 days. Please renew to avoid service interruption.',
+          ? `Usajili wako unaisha hivi karibuni. Lipia Lipa ${lipa} na wasiliana WhatsApp ${wa} ili kuepuka kusitishwa.`
+          : `Your plan expires soon. Renew via Lipa ${lipa} and message WhatsApp ${wa} to avoid interruption.`,
       );
     }
   };
@@ -91,6 +96,8 @@ export const SuperAdminRemindersView: React.FC<Props> = ({
           {isSw ? 'WhatsApp, SMS, au arifa ndani ya programu.' : 'WhatsApp, SMS, or in-app notifications.'}
         </p>
       </header>
+
+      <SubscriptionPayContactCard settings={billing} isSw={isSw} compact />
 
       <div className="grid lg:grid-cols-2 gap-5">
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
@@ -161,7 +168,7 @@ export const SuperAdminRemindersView: React.FC<Props> = ({
           </p>
           <ul className="mt-2 text-[11px] text-amber-800 space-y-1">
             {unpaidTenants.slice(0, 5).map(t => (
-              <li key={t.id}>{t.name} — {paymentStatusLabel(derivePaymentStatus(t.subscriptionExpiry, t.status), isSw)}</li>
+              <li key={t.id}>{t.name} — {paymentStatusLabel(derivePaymentStatus(t.subscriptionExpiry, t.status, billing.graceDays), isSw, billing.trialDays)}</li>
             ))}
           </ul>
         </div>

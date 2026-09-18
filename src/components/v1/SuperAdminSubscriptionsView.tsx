@@ -17,6 +17,8 @@ interface Props {
 }
 
 export const SuperAdminSubscriptionsView: React.FC<Props> = ({
+  language,
+  transactions,
   setTransactions,
   tenants = [],
   setTenants,

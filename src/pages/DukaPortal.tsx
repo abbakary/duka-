@@ -61,7 +61,9 @@ import { SuperAdminTenantsView } from '@/components/v1/SuperAdminTenantsView';
 import { SuperAdminSubscriptionsView } from '@/components/v1/SuperAdminSubscriptionsView';
 import { SuperAdminPlansView } from '@/components/v1/SuperAdminPlansView';
 import { SuperAdminRemindersView } from '@/components/v1/SuperAdminRemindersView';
-import { derivePaymentStatus } from '@/lib/saasPlans';
+import { derivePaymentStatus, isSubscriptionAccessBlocked } from '@/lib/saasPlans';
+import { usePlatformBilling } from '@/context/PlatformBillingContext';
+import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
 import { CustomersCRMView } from '@/components/v1/CustomersCRMView';
 import { ReceivablesPayablesView } from '@/components/v1/ReceivablesPayablesView';
 import { BranchManagementView } from '@/components/v1/BranchManagementView';
@@ -179,6 +181,7 @@ const VENDOR_ROUTE_TABS = [
 export default function DukaPortal() {
   // Global Application View & Authentication State
   const { refreshPlans } = useSaasPlans();
+  const { settings: billingSettings } = usePlatformBilling();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [activeTab, setActiveTab] = useState<string>('landing');
   const [language, setLanguage] = useState<Language>('sw'); // Default Swahili for Tanzania
@@ -212,6 +215,7 @@ export default function DukaPortal() {
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
   const [authPreselectType, setAuthPreselectType] = useState<BusinessType | undefined>(undefined);
   const [authPreselectPlan, setAuthPreselectPlan] = useState<SaaSPlanTier | undefined>(undefined);
+  const [authPreferTrial, setAuthPreferTrial] = useState(true);
 
   // Core Centralized Connected Data Stores
   const [customers, setCustomers] = useState<Customer[]>(EMPTY_CUSTOMERS);
@@ -663,20 +667,23 @@ export default function DukaPortal() {
     role?: UserRole,
     type?: BusinessType,
     plan?: SaaSPlanTier,
+    preferTrial?: boolean,
   ) => {
     if (role === 'super_admin') {
       setActiveTab('login');
       return;
     }
     if (plan) setAuthPreselectPlan(plan);
+    setAuthPreferTrial(preferTrial !== false);
     setActiveTab('register');
     if (type) setAuthPreselectType(type);
   };
 
   const handleOpenLoginFromPublic = () => setActiveTab('login');
-  const handleOpenRegisterFromPublic = (type?: BusinessType, plan?: SaaSPlanTier) => {
+  const handleOpenRegisterFromPublic = (type?: BusinessType, plan?: SaaSPlanTier, preferTrial?: boolean) => {
     if (type) setAuthPreselectType(type);
     if (plan) setAuthPreselectPlan(plan);
+    setAuthPreferTrial(preferTrial !== false);
     setActiveTab('register');
   };
 
@@ -1279,6 +1286,7 @@ export default function DukaPortal() {
         language={language}
         initialBusinessType={authPreselectType}
         initialPlan={authPreselectPlan}
+        initialPreferTrial={authPreferTrial}
         onBack={() => setActiveTab('landing')}
         onLogin={() => setActiveTab('login')}
         onOpenTerms={() => setActiveTab('terms')}
@@ -1301,12 +1309,18 @@ export default function DukaPortal() {
   const vendorPaymentStatus = !isSuperAdminMode && subscriptionExpiry
     ? derivePaymentStatus(
         subscriptionExpiry,
-        currentUser?.status === 'rejected' ? 'suspended' : 'active',
+        currentUser?.status === 'rejected' ? 'suspended' : (currentUser?.status || 'active'),
+        billingSettings.graceDays,
       )
     : 'paid';
   const vendorAccessBlocked =
     !isSuperAdminMode &&
-    (currentUser?.status === 'rejected' || vendorPaymentStatus === 'overdue');
+    !!currentUser &&
+    isSubscriptionAccessBlocked(
+      subscriptionExpiry,
+      currentUser?.status === 'rejected' ? 'suspended' : currentUser?.status,
+      billingSettings.graceDays,
+    );
 
   return (
     <TaxComplianceProvider
@@ -1320,7 +1334,61 @@ export default function DukaPortal() {
       tenantId={currentUser?.businessId || currentUser?.id}
       businessName={businessName || currentUser?.businessName}
     >
-    <div className={`flex h-dvh overflow-hidden font-sans ${isSuperAdminMode ? 'bg-[#F9F9F7] text-[#003322]' : 'bg-[#f0f2f5] text-[#323130]'}`}>
+    {/* ─── FULL-SCREEN POS MODE: no sidebar, no header ─────────────────────── */}
+    {activeTab === 'pos' && !isSuperAdminMode && !vendorAccessBlocked && (
+      <div className="fixed inset-0 z-50 bg-[#F5F5F5] font-sans overflow-hidden flex flex-col">
+        <POSView
+          language={language}
+          businessType={businessType}
+          products={products}
+          customers={customers}
+          activeBranchId={resolveApiBranchId()}
+          branchVatRegistered={branches.find(b => b.id === resolveApiBranchId())?.vatRegistered}
+          setCustomers={setCustomers}
+          onCustomersChanged={refreshCustomersFromApi}
+          onCompleteSale={handleCompleteSale}
+          onSavePending={handleSavePendingSale}
+          onOpenPending={() => setActiveTab('pending-transactions')}
+          tenantId={tenantStorageId}
+          pendingCount={
+            countAwaitingPaymentDrafts(tenantStorageId) +
+            sales.filter(s => AWAITING_PAYMENT_STATUSES.includes(s.status as typeof AWAITING_PAYMENT_STATUSES[number])).length
+          }
+          cashierName={currentUser?.name || 'Cashier'}
+          onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
+          onNavigateToReceivables={() => setActiveTab('receivables-payables')}
+          initialCart={posPreloadCart ?? undefined}
+          initialCustomerId={posPreloadCustomer?.id}
+          initialCustomerName={posPreloadCustomer?.name}
+          initialDraftId={posPreloadDraftId ?? undefined}
+          resumeSaleId={posResumeSaleId ?? undefined}
+          onFinalizeResume={async (saleId, sale) => {
+            await api.finalizeSale(saleId, {
+              payments: sale.payments.map(p => ({
+                method: p.method,
+                amount: p.amount,
+                reference: p.reference,
+              })),
+              customer_id: sale.customerId,
+              customer_name: sale.customerName,
+            });
+            setPosResumeSaleId(null);
+            await applyApiTenantData();
+          }}
+          onResumeConsumed={() => {
+            setPosPreloadCart(null);
+            setPosPreloadCustomer(null);
+            setPosPreloadDraftId(null);
+            setPosResumeSaleId(null);
+          }}
+          tableContextLabel={posTableLabel ?? undefined}
+          currentUser={currentUser}
+          onExitPOS={() => setActiveTab('dashboard')}
+        />
+      </div>
+    )}
+
+    <div className={`flex h-dvh overflow-hidden font-sans ${activeTab === 'pos' && !isSuperAdminMode ? 'invisible' : ''} ${isSuperAdminMode ? 'bg-[#F9F9F7] text-[#003322]' : 'bg-[#f0f2f5] text-[#323130]'}`}>
       {/* 1. Left Sidebar — drawer on mobile, persistent on lg+ */}
       {isSuperAdminMode ? (
         <SuperAdminSidebar
@@ -1544,23 +1612,36 @@ export default function DukaPortal() {
                   />
                 )}
 
-                {vendorAccessBlocked && (
-                  <div className="mb-4 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-4 text-sm text-rose-900">
-                    <p className="font-bold">
-                      {language === 'sw' ? 'Huduma imezuiwa — malipo yanahitajika' : 'Service blocked — payment required'}
-                    </p>
-                    <p className="text-xs mt-1 text-rose-800">
-                      {language === 'sw'
-                        ? 'Usajili wako umeisha au akaunti imesimamishwa. Lipia ili kuendelea kutumia POS, hesabu na bidhaa.'
-                        : 'Your subscription expired or the account was suspended. Pay to restore POS, inventory, and reports.'}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('settings')}
-                      className="mt-3 px-4 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer"
-                    >
-                      {language === 'sw' ? 'Nenda Malipo & Mpango' : 'Go to Plan & Billing'}
-                    </button>
+                {vendorAccessBlocked && activeTab !== 'settings' && (
+                  <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl border-2 border-rose-300 shadow-2xl max-w-md w-full p-5 space-y-4">
+                      <div>
+                        <p className="font-black text-lg text-rose-900">
+                          {language === 'sw'
+                            ? 'Jaribio / usajili umeisha — boresha sasa'
+                            : 'Trial / subscription expired — upgrade now'}
+                        </p>
+                        <p className="text-xs mt-1.5 text-rose-800 leading-relaxed">
+                          {language === 'sw'
+                            ? `Siku ${billingSettings.trialDays} za bure zimeisha au malipo yamechelewa. Lipia kifurushi cha kulipia ili kuendelea kutumia POS, stoo na ripoti.`
+                            : `Your ${billingSettings.trialDays}-day free trial ended or payment is overdue. Upgrade to a paid package to restore POS, inventory, and reports.`}
+                        </p>
+                      </div>
+                      <SubscriptionPayContactCard
+                        settings={billingSettings}
+                        isSw={language === 'sw'}
+                        businessName={businessName || currentUser?.businessName}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('settings')}
+                          className="flex-1 min-w-[140px] px-4 py-2.5 rounded-xl bg-rose-700 text-white text-xs font-bold cursor-pointer"
+                        >
+                          {language === 'sw' ? 'Fungua Malipo & Mpango' : 'Open Plan & Billing'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
                 {(activeTab === 'dashboard' || activeTab === 'landing') && (
@@ -1702,55 +1783,8 @@ export default function DukaPortal() {
                 )}
 
 
-                {activeTab === 'pos' && (
-                  <POSView
-                    language={language}
-                    businessType={businessType}
-                    products={products}
-                    customers={customers}
-                    activeBranchId={resolveApiBranchId()}
-                    branchVatRegistered={branches.find(b => b.id === resolveApiBranchId())?.vatRegistered}
-                    setCustomers={setCustomers}
-                    onCustomersChanged={refreshCustomersFromApi}
-                    onCompleteSale={handleCompleteSale}
-                    onSavePending={handleSavePendingSale}
-                    onOpenPending={() => setActiveTab('pending-transactions')}
-                    tenantId={tenantStorageId}
-                    pendingCount={
-                      countAwaitingPaymentDrafts(tenantStorageId) +
-                      sales.filter(s => AWAITING_PAYMENT_STATUSES.includes(s.status as typeof AWAITING_PAYMENT_STATUSES[number])).length
-                    }
-                    cashierName={currentUser?.name || 'Cashier'}
-                    onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
-                    onNavigateToReceivables={() => setActiveTab('receivables-payables')}
-                    initialCart={posPreloadCart ?? undefined}
-                    initialCustomerId={posPreloadCustomer?.id}
-                    initialCustomerName={posPreloadCustomer?.name}
-                    initialDraftId={posPreloadDraftId ?? undefined}
-                    resumeSaleId={posResumeSaleId ?? undefined}
-                    onFinalizeResume={async (saleId, sale) => {
-                      await api.finalizeSale(saleId, {
-                        payments: sale.payments.map(p => ({
-                          method: p.method,
-                          amount: p.amount,
-                          reference: p.reference,
-                        })),
-                        customer_id: sale.customerId,
-                        customer_name: sale.customerName,
-                      });
-                      setPosResumeSaleId(null);
-                      await applyApiTenantData();
-                    }}
-                    onResumeConsumed={() => {
-                      setPosPreloadCart(null);
-                      setPosPreloadCustomer(null);
-                      setPosPreloadDraftId(null);
-                      setPosResumeSaleId(null);
-                    }}
-                    tableContextLabel={posTableLabel ?? undefined}
-                    currentUser={currentUser}
-                  />
-                )}
+                {/* POS is rendered fullscreen above — no duplicate here */}
+
 
                 {activeTab === 'pending-transactions' && (
                   <PendingTransactionsView

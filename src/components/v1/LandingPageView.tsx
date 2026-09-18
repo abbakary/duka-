@@ -17,14 +17,16 @@ import {
   type PlatformShowcaseItem,
 } from '@/lib/platformShowcase';
 import { useSaasPlans } from '@/context/SaasPlansContext';
+import { usePlatformBilling } from '@/context/PlatformBillingContext';
 import { formatPlanPrice, planBranchLabel, planFeatures, planPeriod } from '@/lib/saasPlans';
+import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 
 export interface LandingPageViewProps {
   language: Language;
   onOpenLogin: () => void;
-  onOpenRegister: (businessType?: BusinessType, planTier?: SaaSPlanTier) => void;
-  onLaunchPortal?: (role?: UserRole, type?: BusinessType, planTier?: SaaSPlanTier) => void;
+  onOpenRegister: (businessType?: BusinessType, planTier?: SaaSPlanTier, preferTrial?: boolean) => void;
+  onLaunchPortal?: (role?: UserRole, type?: BusinessType, planTier?: SaaSPlanTier, preferTrial?: boolean) => void;
   onOpenTerms?: () => void;
 }
 
@@ -74,6 +76,7 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
 }) => {
   const isSw = language === 'sw';
   const { plans } = useSaasPlans();
+  const { settings: billingSettings } = usePlatformBilling();
   const [showcase, setShowcase] = useState<PlatformShowcaseItem[]>(DEFAULT_SHOWCASE_ITEMS);
   const [galleryIndex, setGalleryIndex] = useState(0);
 
@@ -94,9 +97,9 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const startRegister = (type?: BusinessType, planTier?: SaaSPlanTier) => {
-    if (onLaunchPortal) onLaunchPortal(undefined, type, planTier);
-    else onOpenRegister(type, planTier);
+  const startRegister = (type?: BusinessType, planTier?: SaaSPlanTier, preferTrial?: boolean) => {
+    if (onLaunchPortal) onLaunchPortal(undefined, type, planTier, preferTrial);
+    else onOpenRegister(type, planTier, preferTrial);
   };
 
   return (
@@ -144,8 +147,8 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
             </h1>
             <p className="mt-5 text-lg text-slate-600 max-w-lg leading-relaxed">
               {isSw
-                ? 'POS, hifadhi, wateja, TRA EFD, na ripoti — mfumo mmoja wa ERP kwa maduka, pharmacy, hardware na zaidi.'
-                : 'POS, inventory, CRM, TRA EFD receipts, and reports — one ERP for retail, pharmacy, hardware, restaurants, and more.'}
+                ? `POS, hifadhi, wateja, TRA EFD, na ripoti — jaribio bure siku ${billingSettings.trialDays}, kisha lipia Lipa namba.`
+                : `POS, inventory, CRM, TRA EFD, and reports — ${billingSettings.trialDays}-day free trial, then pay via Lipa number.`}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <button
@@ -329,10 +332,68 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
           </h2>
           <p className="mt-3 text-slate-600 max-w-2xl">
             {isSw
-              ? 'Bei wazi — vipengele ni vile vile kwenye vifurushi vyote. Tofauti ni idadi ya matawi na bei tu (1, 2, au 3 matawi).'
-              : 'Transparent pricing — every package includes the same features. Only branch count and price differ (1, 2, or 3 branches).'}
+              ? `Anza na jaribio bure siku ${billingSettings.trialDays}, au chagua kifurushi cha kulipia moja kwa moja. Vipengele ni vile vile — tofauti ni matawi na bei (1, 2, au 3).`
+              : `Start with a ${billingSettings.trialDays}-day free trial, or pick a paid package now. Same features — only branches and price differ (1, 2, or 3).`}
           </p>
-          <div className="mt-12 grid md:grid-cols-3 gap-6">
+
+          {/* Free trial — professional primary path */}
+          <div className="mt-10 rounded-2xl border-2 border-teal-500 bg-gradient-to-br from-teal-50 via-white to-emerald-50 p-6 sm:p-8 shadow-md relative overflow-hidden">
+            <span className="absolute top-4 right-4 px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider text-white" style={{ background: TEAL }}>
+              {isSw ? 'Inapendekezwa' : 'Recommended'}
+            </span>
+            <div className="grid lg:grid-cols-[1.2fr_1fr] gap-6 items-center">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-teal-700">
+                  {isSw ? 'Jaribio la bure' : 'Free trial'}
+                </p>
+                <h3 className="mt-1 font-serif font-bold text-2xl sm:text-3xl text-slate-900">
+                  {isSw
+                    ? `Siku ${billingSettings.trialDays} bure — kisha chagua kifurushi`
+                    : `${billingSettings.trialDays} days free — then choose a package`}
+                </h3>
+                <p className="mt-2 text-sm text-slate-600 max-w-xl leading-relaxed">
+                  {isSw
+                    ? 'Fungua akaunti, jaribu POS, stoo na ripoti bila malipo. Baada ya jaribio, lipia Lipa namba na thibitisha WhatsApp.'
+                    : 'Open an account and try POS, inventory, and reports at no charge. After the trial, pay via Lipa number and confirm on WhatsApp.'}
+                </p>
+                <ul className="mt-4 grid sm:grid-cols-2 gap-2 text-sm text-slate-700">
+                  {(isSw
+                    ? ['Hakuna malipo sasa', 'Ufikiaji kamili wa vipengele', 'Unaweza kuboresha baadaye', 'Msaada kupitia WhatsApp']
+                    : ['No payment now', 'Full feature access', 'Upgrade anytime', 'WhatsApp support']
+                  ).map(f => (
+                    <li key={f} className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" /> {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => startRegister(undefined, 'starter', true)}
+                  className="mt-6 px-7 py-3 rounded-full text-sm font-bold text-white cursor-pointer shadow-md"
+                  style={{ background: TEAL }}
+                >
+                  {isSw ? 'Anza jaribio bure' : 'Start free trial'}
+                </button>
+              </div>
+              <div className="rounded-xl bg-white/80 border border-teal-100 p-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-teal-800">TZS 0</span>
+                  <span className="text-sm text-slate-500 font-medium">
+                    / {isSw ? `siku ${billingSettings.trialDays}` : `${billingSettings.trialDays} days`}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-2 mb-3">
+                  {isSw ? 'Baada ya jaribio — lipia kifurushi:' : 'After trial — pay for a package:'}
+                </p>
+                <SubscriptionPayContactCard settings={billingSettings} isSw={isSw} compact />
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-10 text-xs font-bold uppercase tracking-widest text-slate-500">
+            {isSw ? 'Au chagua kifurushi cha kulipia sasa' : 'Or choose a paid package now'}
+          </p>
+          <div className="mt-4 grid md:grid-cols-3 gap-6">
             {plans.filter(plan => Boolean(plan?.id)).map(plan => (
               <div
                 key={plan.id}
@@ -363,7 +424,7 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
                 </ul>
                 <button
                   type="button"
-                  onClick={() => startRegister(undefined, plan.tier)}
+                  onClick={() => startRegister(undefined, plan.tier, false)}
                   className={`mt-6 w-full py-2.5 rounded-full text-sm font-bold cursor-pointer ${plan.popular ? 'text-white' : 'border border-slate-200 bg-white text-slate-800'}`}
                   style={plan.popular ? { background: TEAL } : undefined}
                 >
@@ -404,10 +465,10 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
             </div>
             <button
               type="button"
-              onClick={() => startRegister()}
+              onClick={() => startRegister(undefined, undefined, true)}
               className="mt-8 px-6 py-3 rounded-full bg-white text-teal-800 text-sm font-bold cursor-pointer hover:bg-teal-50"
             >
-              {isSw ? 'Jisajili sasa' : 'Register now'}
+              {isSw ? 'Anza jaribio bure' : 'Start free trial'}
             </button>
           </div>
           <div className="space-y-3">
@@ -431,15 +492,17 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
         <div className="max-w-xl mx-auto px-4">
           <h2 className="text-3xl font-serif font-bold text-slate-900">{isSw ? 'Anza leo' : 'Start today'}</h2>
           <p className="mt-3 text-slate-600">
-            {isSw ? 'ERP ya biashara. Hakuna foleni. Simu na kompyuta.' : 'Business ERP. No queues. Phone and desktop.'}
+            {isSw
+              ? `Jaribio bure siku ${billingSettings.trialDays}. Baada ya hapo lipia Lipa ${billingSettings.lipaNumber} — WhatsApp ${billingSettings.whatsappNumber}.`
+              : `${billingSettings.trialDays}-day free trial. Then pay Lipa ${billingSettings.lipaNumber} — WhatsApp ${billingSettings.whatsappNumber}.`}
           </p>
           <button
             type="button"
-            onClick={() => startRegister()}
+            onClick={() => startRegister(undefined, undefined, true)}
             className="mt-8 px-8 py-3.5 rounded-full text-sm font-bold text-white cursor-pointer shadow-md"
             style={{ background: TEAL }}
           >
-            {isSw ? 'Jisajili sasa' : 'Register now'}
+            {isSw ? 'Anza jaribio bure' : 'Start free trial'}
           </button>
         </div>
       </section>

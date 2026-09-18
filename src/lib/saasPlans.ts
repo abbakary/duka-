@@ -133,7 +133,7 @@ export function planFeatures(plan: PublicPlan, lang: Language): string[] {
 
 export type PaymentStatus = 'paid' | 'unpaid' | 'overdue' | 'trial' | 'grace';
 
-export function derivePaymentStatus(expiry: string, status: string): PaymentStatus {
+export function derivePaymentStatus(expiry: string, status: string, graceDays = 0): PaymentStatus {
   if (status === 'suspended') return 'overdue';
   if (status === 'grace_period') return 'grace';
   if (status === 'pending_kyc') return 'trial';
@@ -142,18 +142,33 @@ export function derivePaymentStatus(expiry: string, status: string): PaymentStat
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   exp.setHours(0, 0, 0, 0);
-  if (exp >= now) return 'paid';
+  if (exp >= now) {
+    // Within trial window still shows as paid/active access; label "trial" if caller wants
+    return 'paid';
+  }
   const daysPast = (now.getTime() - exp.getTime()) / 86400000;
-  if (daysPast <= 7) return 'grace';
+  if (graceDays > 0 && daysPast <= graceDays) return 'grace';
   return 'overdue';
 }
 
-export function paymentStatusLabel(s: PaymentStatus, isSw: boolean): string {
+/** True when vendor must upgrade / pay before using the app. */
+export function isSubscriptionAccessBlocked(
+  expiry: string | undefined,
+  status: string | undefined,
+  graceDays = 0,
+): boolean {
+  if (status === 'rejected' || status === 'suspended') return true;
+  if (!expiry) return false;
+  const s = derivePaymentStatus(expiry, status || 'active', graceDays);
+  return s === 'overdue' || s === 'unpaid';
+}
+
+export function paymentStatusLabel(s: PaymentStatus, isSw: boolean, trialDays = 14): string {
   const map: Record<PaymentStatus, [string, string]> = {
-    paid: ['Paid', 'Imelipwa'],
+    paid: ['Active', 'Inatumika'],
     unpaid: ['Unpaid', 'Haijalipwa'],
-    overdue: ['Overdue', 'Imechelewa'],
-    trial: ['Trial / KYC', 'Jaribio / KYC'],
+    overdue: ['Expired — upgrade required', 'Imeisha — boresha'],
+    trial: [`${trialDays}-day free trial`, `Jaribio la siku ${trialDays}`],
     grace: ['Grace period', 'Muda wa rehema'],
   };
   return isSw ? map[s][1] : map[s][0];

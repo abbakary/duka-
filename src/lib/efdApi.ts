@@ -216,11 +216,25 @@ export async function submitReceiptToEfdApi(
     }
 
     const data = (parsed.data ?? parsed) as Record<string, unknown>;
+    const statusStr = String(data.status ?? parsed.status ?? '').toLowerCase();
+    const msg = String(data.MSG ?? data.msg ?? data.message ?? data.error ?? '');
+    if (statusStr === 'error' || statusStr === 'failed' || statusStr === 'rejected') {
+      return {
+        ok: false,
+        errorMessage: msg || 'TRA rejected receipt',
+        rawResponse: text,
+        status: 'failed',
+      };
+    }
+
+    const verificationCode = String(data.verificationCode ?? data.verification_code ?? data.RCTVNUM ?? '');
+    const verificationLink = String(data.verificationLink ?? data.verification_link ?? data.qrcode ?? data.QRCODE ?? '');
+
     return {
       ok: true,
       receiptNumber: String(data.receiptNumber ?? data.receipt_number ?? sale.receiptNumber),
-      verificationCode: String(data.verificationCode ?? data.verification_code ?? ''),
-      verificationLink: String(data.verificationLink ?? data.verification_link ?? ''),
+      verificationCode,
+      verificationLink,
       zNumber: String(data.zNumber ?? data.z_number ?? settings.zNumber),
       vrn: String(data.vrn ?? taxSettings.vrnNumber),
       status: settings.demoMode ? 'demo' : 'success',

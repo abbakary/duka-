@@ -23,10 +23,14 @@ import {
   MapPin,
   Clock,
   ArrowRight,
+  ArrowLeft,
   Send,
   Info,
   Lock,
   Unlock,
+  ChevronUp,
+  Home,
+  LayoutGrid,
 } from 'lucide-react';
 import { CartItem, Customer, Language, PaymentMethod, Product, SaleTransaction, BusinessType, AuthUser } from '@/types/v1';
 import { formatTSh, getTranslation } from '@/utils/translations';
@@ -35,6 +39,7 @@ import { productMatchesSearch } from '@/lib/productMetaDisplay';
 import { ProductMetaBadges } from '@/components/v1/ProductMetaBadges';
 import { ProductImageThumb } from '@/components/v1/ProductImage';
 import { POSQRScannerModal } from '@/components/v1/POSQRScannerModal';
+import { ModalPortal } from '@/components/ui/ModalPortal';
 import { useEffectiveTaxCompliance } from '@/context/TaxComplianceContext';
 import { useTraReceipts } from '@/context/TraReceiptContext';
 import type { TraReceipt } from '@/types/traReceipt';
@@ -52,7 +57,6 @@ import {
   isVatActive,
   getComplianceStatusLabel,
 } from '@/lib/taxComplianceSettings';
-import { PageSectionHeader } from '@/components/v1/PageSectionHeader';
 import { computeSaleDiscountAmount, saleGrossSubtotal } from '@/lib/saleDiscountUtils';
 import { resolvePosPricingAccess, getDashboardPersona } from '@/lib/rbac';
 import { api } from '@/lib/api';
@@ -71,12 +75,16 @@ import {
   validatePaymentDueDate,
   formatDueDateDisplay,
 } from '@/lib/dueDate';
+import { TraFiscalSlipPreview } from '@/components/v1/TraFiscalSlipPreview';
+import { printTraFiscalSlip } from '@/lib/traFiscalSlip';
 import {
   closeCashierShift,
   getOpenCashierShift,
   openCashierShift,
   type CashierShiftSession,
 } from '@/lib/cashierShiftStore';
+
+type PosReceiptType = 'tra_fiscal' | 'standard';
 
 interface POSViewProps {
   language: Language;
@@ -104,6 +112,8 @@ interface POSViewProps {
   currentUser?: AuthUser | null;
   activeBranchId?: string | null;
   branchVatRegistered?: boolean | null;
+  /** Leave full-screen POS back to main dashboard / menu */
+  onExitPOS?: () => void;
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -132,13 +142,14 @@ export const POSView: React.FC<POSViewProps> = ({
   currentUser,
   activeBranchId,
   branchVatRegistered,
+  onExitPOS,
 }) => {
   const isSw = language === 'sw';
   const t = (key: any) => getTranslation(language, key);
   const workplace = getWorkplace(businessType, isSw ? 'sw' : 'en');
   const taxSettings = useEffectiveTaxCompliance(activeBranchId, branchVatRegistered);
   const vatActive = isVatActive(taxSettings);
-  const { issueFromSale } = useTraReceipts();
+  const { issueFromSale, efdSettings } = useTraReceipts();
   const { config, getActive } = useDocumentTemplates();
   const pricing = useMemo(
     () => resolvePosPricingAccess(currentUser, taxSettings),
@@ -227,12 +238,28 @@ export const POSView: React.FC<POSViewProps> = ({
   const [amountPaidInput, setAmountPaidInput] = useState<string>('');
   const [cartDiscountPercent, setCartDiscountPercent] = useState<number>(0);
   const [paymentDueDate, setPaymentDueDate] = useState<string>('');
+  /** Cart list vs payment step — keeps selected items visible (no crowded payment pad). */
+  const [posStep, setPosStep] = useState<'cart' | 'pay'>('cart');
+  /** Mobile bottom sheet for cart / checkout */
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const partialAmountRef = useRef<HTMLInputElement>(null);
   /** Per-sale VAT: default follows shop settings; cashier can flip for this cart. */
   const [applyVatThisSale, setApplyVatThisSale] = useState<boolean>(vatActive);
+  /** TRA fiscal (send to EFD + legal slip) vs standard shop receipt (no TRA). */
+  const [receiptType, setReceiptType] = useState<PosReceiptType>(
+    taxSettings.mode === 'tra_efd' ? 'tra_fiscal' : 'standard',
+  );
 
   useEffect(() => {
     setApplyVatThisSale(vatActive);
   }, [vatActive, activeBranchId]);
+
+  useEffect(() => {
+    setReceiptType(taxSettings.mode === 'tra_efd' ? 'tra_fiscal' : 'standard');
+  }, [taxSettings.mode, activeBranchId]);
+
+  const canIssueTraFiscal = taxSettings.mode === 'tra_efd';
+  const wantTraFiscal = canIssueTraFiscal && receiptType === 'tra_fiscal';
 
   const saleTaxSettings = useMemo(() => {
     if (!taxSettings.vatRegistered || taxSettings.mode === 'non_vat') {
@@ -507,14 +534,38 @@ export const POSView: React.FC<POSViewProps> = ({
     }
   }, [needsDueDate, paymentDueDate]);
 
+  React.useEffect(() => {
+    if (paymentMode === 'partial') {
+      const t = window.setTimeout(() => partialAmountRef.current?.focus(), 100);
+      return () => window.clearTimeout(t);
+    }
+  }, [paymentMode]);
+
+  const cartItemCount = cart.reduce((n, i) => n + i.quantity, 0);
+
+  const goToPayStep = () => {
+    if (cart.length === 0) return;
+    setPosStep('pay');
+    setMobileCartOpen(true);
+  };
+
+  const goToCartStep = () => setPosStep('cart');
+
+  const setPartialAmount = (value: string) => {
+    const cleaned = value.replace(/[^\d.]/g, '');
+    setAmountPaidInput(cleaned);
+    setValidationError(null);
+  };
+
   const buildCurrentSale = useCallback(
-    (finalize: boolean, clientTransactionId?: string) =>
-      buildSaleFromCart({
+    (finalize: boolean, clientTransactionId?: string, modeOverride?: 'full' | 'partial' | 'credit') => {
+      const mode = modeOverride ?? paymentMode;
+      return buildSaleFromCart({
         cart,
         customer: selectedCustomer,
-        paymentMode,
+        paymentMode: mode,
         paymentMethod: selectedPaymentMethod,
-        amountPaid: Number(amountPaidInput) || 0,
+        amountPaid: mode === 'full' ? total : mode === 'credit' ? 0 : Number(amountPaidInput) || 0,
         taxSettings: saleTaxSettings,
         cashierName,
         clientTransactionId: clientTransactionId ?? openDraftIdRef.current ?? undefined,
@@ -522,10 +573,14 @@ export const POSView: React.FC<POSViewProps> = ({
         isSw,
         branchId: activeBranchId ?? undefined,
         cartDiscountPercent: pricing.canApplyDiscount ? cartDiscountPercent : 0,
-        paymentDueDate: needsDueDate ? paymentDueDate : undefined,
+        paymentDueDate:
+          mode === 'credit' || (mode === 'partial' && (Number(amountPaidInput) || 0) < total)
+            ? paymentDueDate
+            : undefined,
         receiptNumber: finalize ? generateReceiptNumber(taxSettings) : undefined,
-      }),
-    [cart, selectedCustomer, paymentMode, selectedPaymentMethod, amountPaidInput, saleTaxSettings, cashierName, isSw, activeBranchId, cartDiscountPercent, pricing.canApplyDiscount, needsDueDate, paymentDueDate],
+      });
+    },
+    [cart, selectedCustomer, paymentMode, selectedPaymentMethod, amountPaidInput, saleTaxSettings, cashierName, isSw, activeBranchId, cartDiscountPercent, pricing.canApplyDiscount, paymentDueDate, total, taxSettings],
   );
 
   const handleSaveAndNext = async () => {
@@ -561,6 +616,8 @@ export const POSView: React.FC<POSViewProps> = ({
       setCart([]);
       setAmountPaidInput('');
       setSelectedCustomerId('');
+      setPosStep('cart');
+      setMobileCartOpen(false);
       resumeCustomerPinRef.current = null;
       setValidationError(null);
     } finally {
@@ -573,6 +630,8 @@ export const POSView: React.FC<POSViewProps> = ({
     setAmountPaidInput('');
     setPaymentDueDate('');
     setSelectedCustomerId('');
+    setPosStep('cart');
+    setMobileCartOpen(false);
     openDraftIdRef.current = null;
     resumeSaleIdRef.current = null;
     onResumeConsumed?.();
@@ -587,8 +646,34 @@ export const POSView: React.FC<POSViewProps> = ({
       return;
     }
 
+    // Partial: require a clear amount paid now (0 < amount < total); ≥ total → treat as full
+    let effectiveMode = paymentMode;
+    if (paymentMode === 'partial') {
+      const paidNow = Number(amountPaidInput);
+      if (!amountPaidInput.trim() || Number.isNaN(paidNow) || paidNow <= 0) {
+        setValidationError(
+          isSw
+            ? 'Ingiza kiasi anacholipa mteja sasa (malipo ya awamu).'
+            : 'Enter the amount the customer is paying now (partial payment).',
+        );
+        setPosStep('pay');
+        setMobileCartOpen(true);
+        setTimeout(() => partialAmountRef.current?.focus(), 80);
+        return;
+      }
+      if (paidNow >= total) {
+        effectiveMode = 'full';
+        setPaymentMode('full');
+        setAmountPaidInput('');
+      }
+    }
+
+    const balanceForValidation =
+      effectiveMode === 'full' ? 0 : effectiveMode === 'credit' ? total : Math.max(0, total - (Number(amountPaidInput) || 0));
+    const creditOrPartialNow = effectiveMode === 'credit' || (effectiveMode === 'partial' && balanceForValidation > 0);
+
     // 1. Strict Requirement: If customer needs credit or partial payment, NO SALE CAN BE DONE until customer is selected or created!
-    if (isCreditOrPartial) {
+    if (creditOrPartialNow) {
       if (!selectedCustomer) {
         setValidationError(
           isSw 
@@ -600,17 +685,17 @@ export const POSView: React.FC<POSViewProps> = ({
       }
 
       // Check credit limit
-      if (selectedCustomer.balance + balanceRemaining > selectedCustomer.creditLimit) {
+      if (selectedCustomer.balance + balanceForValidation > selectedCustomer.creditLimit) {
         const proceed = confirm(
           isSw
-            ? `⚠️ Mteja huyu (${selectedCustomer.name}) atazidi kikomo cha mkopo (${formatTSh(selectedCustomer.creditLimit)}). Salio jipya litakuwa ${formatTSh(selectedCustomer.balance + balanceRemaining)}. Je, unathibitisha kutoa mkopo wa ziada?`
-            : `⚠️ Customer credit limit (${formatTSh(selectedCustomer.creditLimit)}) will be exceeded. New balance will be ${formatTSh(selectedCustomer.balance + balanceRemaining)}. Confirm supervisor override?`
+            ? `⚠️ Mteja huyu (${selectedCustomer.name}) atazidi kikomo cha mkopo (${formatTSh(selectedCustomer.creditLimit)}). Salio jipya litakuwa ${formatTSh(selectedCustomer.balance + balanceForValidation)}. Je, unathibitisha kutoa mkopo wa ziada?`
+            : `⚠️ Customer credit limit (${formatTSh(selectedCustomer.creditLimit)}) will be exceeded. New balance will be ${formatTSh(selectedCustomer.balance + balanceForValidation)}. Confirm supervisor override?`
         );
         if (!proceed) return;
       }
     }
 
-    if (balanceRemaining > 0) {
+    if (balanceForValidation > 0) {
       const dueErr = validatePaymentDueDate(paymentDueDate, isSw);
       if (dueErr) {
         setValidationError(dueErr);
@@ -632,16 +717,18 @@ export const POSView: React.FC<POSViewProps> = ({
     }
 
     const receiptNumber = generateReceiptNumber(taxSettings);
-    const sale = buildCurrentSale(true);
+    const sale = buildCurrentSale(true, undefined, effectiveMode);
     sale.receiptNumber = receiptNumber;
-    sale.traEfdSignature = generateTraSignature(taxSettings, receiptNumber);
+    if (wantTraFiscal) {
+      sale.traEfdSignature = generateTraSignature(taxSettings, receiptNumber);
+    }
     if (selectedPaymentMethod === 'mpesa' && !sale.payments[0]?.reference) {
       sale.payments[0].reference = `MP-${Math.random().toString(36).substring(7).toUpperCase()}`;
     }
 
     const finishSale = async () => {
       let traReceipt: TraReceipt | null = null;
-      if (saleVatActive && taxSettings.mode === 'tra_efd') {
+      if (wantTraFiscal && saleVatActive) {
         traReceipt = await issueFromSale(
           sale,
           taxSettings.receiptBusinessName || currentUser?.businessName || 'Shop',
@@ -798,127 +885,130 @@ export const POSView: React.FC<POSViewProps> = ({
   }
 
   return (
-    <div className="space-y-4 pb-12">
-      {requiresOpenShift && openShift && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <span className="font-semibold text-emerald-900 inline-flex items-center gap-1.5">
-            <Unlock className="w-3.5 h-3.5" />
-            {isSw ? 'Zamu wazi' : 'Shift open'} · {new Date(openShift.openedAt).toLocaleTimeString()}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              closeCashierShift({ tenantId: tenantKey, staffId: staffKey });
-              setOpenShift(null);
-            }}
-            className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-bold cursor-pointer"
-          >
-            {isSw ? 'Funga Zamu' : 'Close Shift'}
-          </button>
-        </div>
-      )}
-      <PageSectionHeader
-        title={`${workplace.icon} ${isSw ? workplace.pos_title_sw : workplace.pos_title_en}`}
-        subtitle={
-          <>
-            {currentUser?.businessName || (isSw ? 'Biashara Yako' : 'Your Business')} • {getComplianceStatusLabel(taxSettings, isSw)}
-            {tableContextLabel && (
-              <span className="block mt-1 text-teal-800 font-bold">
-                🍽️ {isSw ? 'Meza' : 'Table'}: {tableContextLabel}
-              </span>
-            )}
-          </>
-        }
-        toolbar={
-          <>
-            {onNavigateToReceivables && (
-              <button
-                type="button"
-                onClick={onNavigateToReceivables}
-                className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-[#D13438] border border-rose-200 text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-                <span>{isSw ? 'Madeni' : 'Receivables'}</span>
-              </button>
-            )}
+    <div className="flex flex-col" style={{minHeight: 'calc(100vh - 80px)'}}>
+
+      {/* ═══ COMPACT TOP BAR ══════════════════════════════════════════════════════ */}
+      <div className="flex items-center justify-between gap-2 px-1 py-1.5 border-b border-[#E1DFDD] bg-white/80 backdrop-blur-sm mb-2">
+        {/* Left: home + title */}
+        <div className="flex items-center gap-2 min-w-0">
+          {onExitPOS && (
             <button
               type="button"
-              onClick={() => setIsQRScannerOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-[#6264A7] hover:bg-[#555793] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+              onClick={onExitPOS}
+              title={isSw ? 'Rudi menyu kuu' : 'Back to main menu'}
+              className="flex items-center justify-center w-9 h-9 rounded-xl border border-[#EDEBE9] bg-[#F8F8F8] hover:bg-[#EDEBE9] text-[#6264A7] cursor-pointer shrink-0"
             >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>{isSw ? 'Skani' : 'Scan'}</span>
+              <Home className="w-4 h-4" />
             </button>
-            <span className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#107C10]/10 text-[#107C10] border border-[#107C10]/30">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{getComplianceStatusLabel(taxSettings, isSw)}</span>
+          )}
+          <span className="text-sm sm:text-base font-extrabold text-[#323130] flex items-center gap-1.5 shrink-0 truncate">
+            {workplace.icon} {isSw ? workplace.pos_title_sw : workplace.pos_title_en}
+          </span>
+          <span className="hidden md:inline text-[11px] text-[#605E5C] font-medium truncate">
+            {currentUser?.businessName || ''}
+            {tableContextLabel && <span className="ml-2 font-bold text-teal-700">🍽️ {tableContextLabel}</span>}
+          </span>
+          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#107C10]/10 text-[#107C10] border border-[#107C10]/30 shrink-0">
+            <ShieldCheck className="w-3 h-3" />
+            {getComplianceStatusLabel(taxSettings, isSw)}
+          </span>
+          {requiresOpenShift && openShift && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+              <Unlock className="w-3 h-3" />
+              {isSw ? 'Zamu wazi' : 'Shift'} · {new Date(openShift.openedAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
             </span>
-          </>
-        }
-      />
+          )}
+        </div>
+        {/* Right: actions */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onExitPOS && (
+            <button
+              type="button"
+              onClick={onExitPOS}
+              className="px-2.5 py-1.5 rounded-lg bg-[#F3F2F1] hover:bg-[#EDEBE9] text-[#323130] border border-[#E1DFDD] text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-[#6264A7]" />
+              <span className="hidden sm:inline">{isSw ? 'Menyu' : 'Menu'}</span>
+            </button>
+          )}
+          {onNavigateToReceivables && (
+            <button type="button" onClick={onNavigateToReceivables}
+              className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-[#D13438] border border-rose-200 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer">
+              <CreditCard className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isSw ? 'Madeni' : 'Receivables'}</span>
+            </button>
+          )}
+          {requiresOpenShift && openShift && (
+            <button type="button" onClick={() => { closeCashierShift({ tenantId: tenantKey, staffId: staffKey }); setOpenShift(null); }}
+              className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer">
+              <Lock className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isSw ? 'Funga' : 'Close Shift'}</span>
+            </button>
+          )}
+        </div>
+      </div>
 
-      {/* STOCK WARNING BANNER IF EXCEEDED */}
+      {/* STOCK WARNING BANNER */}
       {stockWarningMessage && (
-        <div className="p-3.5 bg-amber-50 border-2 border-amber-400 rounded-xl text-xs text-amber-900 font-bold flex items-center justify-between shadow-md animate-in slide-in-from-top duration-200">
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+        <div className="mx-1 mb-2 p-2.5 bg-amber-50 border border-amber-400 rounded-lg text-xs text-amber-900 font-bold flex items-center justify-between animate-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
             <span>{stockWarningMessage}</span>
           </div>
-          <button onClick={() => setStockWarningMessage(null)} className="text-amber-800 hover:text-black">
+          <button onClick={() => setStockWarningMessage(null)} className="text-amber-800 hover:text-black ml-2">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* GENERAL VALIDATION ERROR BANNER */}
+      {/* VALIDATION ERROR BANNER */}
       {validationError && (
-        <div className="p-3.5 bg-rose-50 border-2 border-rose-400 rounded-xl text-xs text-rose-900 font-bold flex items-center justify-between shadow-md animate-in slide-in-from-top duration-200">
-          <div className="flex items-center gap-2.5">
-            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+        <div className="mx-1 mb-2 p-2.5 bg-rose-50 border border-rose-400 rounded-lg text-xs text-rose-900 font-bold flex items-center justify-between animate-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{validationError}</span>
           </div>
-          <button onClick={() => setValidationError(null)} className="text-rose-800 hover:text-black">
+          <button onClick={() => setValidationError(null)} className="text-rose-800 hover:text-black ml-2">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* POS TWO COLUMN LAYOUT: Products Grid (Left 7 cols) & Live Cart Register (Right 5 cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* LEFT PRODUCT CATALOG (7 COLS) */}
-        <div className="lg:col-span-7 space-y-4">
-          {/* Search & Category Filter Pills */}
-          <div className="bg-white rounded-xl p-3 border border-[#E1DFDD] shadow-xs space-y-2">
+      {/* POS LAYOUT: products + cart (desktop) / products + mobile sheet */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 pb-[4.5rem] lg:pb-0" style={{minHeight: 0, alignItems: 'start'}}>
+        {/* LEFT PRODUCT CATALOG */}
+        <div className="lg:col-span-6 space-y-3 min-w-0">
+          <div className="bg-white rounded-xl p-2.5 sm:p-3 border border-[#E1DFDD] shadow-xs space-y-2 sticky top-0 z-[1]">
             <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-[#605E5C] absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-4 h-4 text-[#605E5C] absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
-                  type="text"
+                  type="search"
                   placeholder={t('searchProducts')}
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-[#F3F2F1] border border-transparent focus:border-[#0078D4] focus:bg-white rounded-lg text-xs outline-none"
+                  className="w-full pl-9 pr-3 py-2.5 bg-[#F3F2F1] border border-transparent focus:border-[#0078D4] focus:bg-white rounded-xl text-xs outline-none"
                 />
               </div>
-
               <button
+                type="button"
                 onClick={() => setIsScannerOpen(true)}
-                className="px-3.5 py-2 rounded-lg bg-[#6264A7] hover:bg-[#555793] text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
-                title="Scan QR or Barcode with Camera"
+                className="px-3 py-2.5 rounded-xl bg-[#6264A7] hover:bg-[#555793] text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                title={isSw ? 'Skani QR / Barcode' : 'Scan QR or Barcode'}
               >
                 <Camera className="w-4 h-4 text-emerald-300" />
-                <span className="hidden sm:inline">Scan QR</span>
+                <span className="hidden sm:inline">{isSw ? 'Skani' : 'Scan'}</span>
               </button>
             </div>
-
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs">
               {categories.map(cat => (
                 <button
                   key={cat}
+                  type="button"
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1 rounded-lg capitalize whitespace-nowrap text-xs font-medium transition-all ${
+                  className={`px-3 py-1.5 rounded-lg capitalize whitespace-nowrap text-[11px] font-semibold transition-all cursor-pointer ${
                     selectedCategory === cat
-                      ? 'bg-[#6264A7] text-white font-bold shadow-xs'
+                      ? 'bg-[#6264A7] text-white shadow-xs'
                       : 'bg-[#F3F2F1] text-[#605E5C] hover:text-[#323130]'
                   }`}
                 >
@@ -928,555 +1018,706 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           </div>
 
-          {/* Product Cards Grid with Automatic Available Stock Display */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-[580px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3 overflow-y-auto overscroll-contain pr-0.5" style={{maxHeight: 'calc(100dvh - 11rem)'}}>
             {filteredProducts.map(prod => {
               const isOutOfStock = prod.stock <= 0;
               const isLowStock = prod.stock > 0 && prod.stock <= prod.reorderPoint;
               const cartItem = cart.find(c => c.product.id === prod.id);
-              const remainingAfterCart = prod.stock - (cartItem?.quantity || 0);
+              const inCartQty = cartItem?.quantity || 0;
+              const remainingAfterCart = prod.stock - inCartQty;
 
               return (
-                <div
+                <button
                   key={prod.id}
+                  type="button"
+                  disabled={isOutOfStock}
                   onClick={() => !isOutOfStock && handleAddToCart(prod)}
-                  className={`bg-white rounded-xl p-3.5 border shadow-xs transition-all flex flex-col justify-between group select-none ${
-                    isOutOfStock 
+                  className={`text-left bg-white rounded-xl border shadow-xs transition-all flex flex-col overflow-hidden select-none isolate ${
+                    isOutOfStock
                       ? 'border-rose-200 bg-rose-50/40 opacity-70 cursor-not-allowed'
-                      : 'border-[#E1DFDD] hover:border-[#6264A7] hover:shadow-md cursor-pointer active:scale-[0.98]'
+                      : 'border-[#E1DFDD] hover:border-[#6264A7] hover:shadow-md cursor-pointer'
                   }`}
                 >
-                  <div>
-                    <div className="mb-2 -mx-0.5 rounded-lg overflow-hidden border border-[#EDEBE9] bg-[#F3F2F1]">
-                      <ProductImageThumb src={prod.imageUrl} name={prod.name} size="card" />
-                    </div>
-                    <div className="flex items-start justify-between gap-1 mb-1">
-                      <span className="text-[10px] font-mono text-[#605E5C] bg-[#F3F2F1] px-1.5 py-0.5 rounded">
-                        {prod.sku}
+                  <div className="relative">
+                    <ProductImageThumb src={prod.imageUrl} name={prod.name} size="pos" />
+                    {inCartQty > 0 && (
+                      <span className="absolute top-1.5 left-1.5 min-w-[1.35rem] h-5 px-1 rounded-full bg-[#6264A7] text-white text-[10px] font-black flex items-center justify-center shadow">
+                        {inCartQty}
                       </span>
-                      {isOutOfStock ? (
-                        <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-rose-600 text-white shadow-xs">
-                          {isSw ? 'HAKUNA STOO' : 'OUT OF STOCK'}
-                        </span>
-                      ) : businessType === 'pharmacy' && prod.requiresPrescription ? (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200">
-                          Rx Required
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <h4 className="text-xs font-bold text-[#323130] line-clamp-2 group-hover:text-[#6264A7] transition-colors">
+                    )}
+                    {isOutOfStock ? (
+                      <span className="absolute top-1.5 right-1.5 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-rose-600 text-white">
+                        {isSw ? 'HAKUNA' : 'OUT'}
+                      </span>
+                    ) : (
+                      <span className={`absolute bottom-1.5 right-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm ${
+                        isLowStock ? 'bg-amber-500/90 text-white' : 'bg-black/55 text-white'
+                      }`}>
+                        {prod.stock} {prod.unit}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2 sm:p-2.5 flex flex-col flex-1 gap-0.5">
+                    <span className="text-[9px] font-mono text-[#8A8886] truncate">{prod.sku}</span>
+                    <h4 className="text-[11px] sm:text-xs font-bold text-[#323130] line-clamp-2 leading-snug min-h-[2.2em]">
                       {prod.name}
                     </h4>
-
                     <ProductMetaBadges
                       product={prod}
                       businessType={businessType}
                       language={language}
                       variant="line"
-                      max={2}
-                      className="mt-0.5"
+                      max={1}
+                      className="mt-0.5 hidden sm:flex"
                     />
-
-                    {/* Prominent Available Stock Label */}
-                    <div className="mt-1 flex items-center justify-between text-[11px]">
-                      <span className="text-[#605E5C]">{isSw ? 'Hifadhi Iliyopo:' : 'Available Stock:'}</span>
-                      <strong className={`font-black ${isOutOfStock ? 'text-rose-600' : isLowStock ? 'text-amber-600' : 'text-[#107C10]'}`}>
-                        {prod.stock} {prod.unit}
-                      </strong>
+                    <div className="mt-auto pt-1.5 flex items-center justify-between gap-1">
+                      <span className="text-xs sm:text-sm font-extrabold text-[#0078D4] truncate">
+                        {formatTSh(prod.price)}
+                      </span>
+                      {!isOutOfStock && (
+                        <span className="w-7 h-7 rounded-lg bg-[#F3F2F1] text-[#323130] flex items-center justify-center shrink-0">
+                          <Plus className="w-3.5 h-3.5" />
+                        </span>
+                      )}
                     </div>
-
-                    {cartItem && (
-                      <div className="text-[10px] font-semibold text-[#0078D4] mt-0.5">
-                        {isSw ? 'Kwenye Kikapu:' : 'In Cart:'} {cartItem.quantity} (Stoo Inabaki: {remainingAfterCart})
+                    {inCartQty > 0 && (
+                      <div className="text-[9px] font-semibold text-[#6264A7]">
+                        {isSw ? `Kikapu · baki ${remainingAfterCart}` : `In cart · left ${remainingAfterCart}`}
                       </div>
                     )}
                   </div>
-
-                  <div className="mt-3 pt-2 border-t border-[#F3F2F1] flex items-center justify-between">
-                    <div className="text-xs font-extrabold text-[#0078D4]">
-                      {formatTSh(prod.price)}
-                    </div>
-                    <button 
-                      disabled={isOutOfStock}
-                      className={`w-6 h-6 rounded-lg flex items-center justify-center transition-colors ${
-                        isOutOfStock 
-                          ? 'bg-rose-100 text-rose-400 cursor-not-allowed' 
-                          : 'bg-[#F3F2F1] group-hover:bg-[#6264A7] group-hover:text-white text-[#323130]'
-                      }`}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+                </button>
               );
             })}
           </div>
         </div>
 
-        {/* RIGHT CART & PAYMENT REGISTER (5 COLS) */}
-        <div className="lg:col-span-5 bg-white rounded-xl border border-[#E1DFDD] shadow-xs p-4 flex flex-col justify-between space-y-4">
-          <div>
-            {/* Customer Selection & On-The-Fly Creation Header */}
-            <div className="border-b border-[#F3F2F1] pb-3 mb-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-[#323130]">
-                  {isSw ? 'Mteja wa Mauzo (Customer)' : 'Sales Customer'}
-                  {isCreditOrPartial && <span className="text-[#D13438] ml-1">* Lazima kwa Mkopo</span>}
-                </label>
-                
-                {/* On-the-fly Customer Creation Trigger */}
-                <button
-                  type="button"
-                  id="btn-pos-add-customer"
-                  onClick={() => setIsNewCustomerModalOpen(true)}
-                  className="text-[11px] font-bold text-[#0078D4] hover:text-[#005a9e] flex items-center gap-1 hover:underline cursor-pointer"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>{isSw ? '➕ Sajili Mteja Mpya' : '➕ New Customer'}</span>
-                </button>
-              </div>
-
-              {/* Customer Selector Dropdown */}
-              <select
-                id="select-pos-customer"
-                value={selectedCustomerId}
-                onChange={e => {
-                  setSelectedCustomerId(e.target.value);
-                  setValidationError(null);
-                }}
-                className={`w-full px-3 py-2 text-xs rounded-lg outline-none transition-all ${
-                  isCustomerMissingForCredit 
-                    ? 'bg-rose-50 border-2 border-rose-400 text-rose-900 font-bold animate-pulse'
-                    : 'bg-[#F3F2F1] border border-[#EDEBE9] focus:bg-white focus:border-[#0078D4]'
-                }`}
-              >
-                <option value="">👤 {isSw ? 'Mteja wa Taslimu (Walk-in Customer)' : 'Walk-in Customer (Cash Only)'}</option>
-                {selectedCustomer && !branchCustomers.some(c => c.id === selectedCustomer.id) && (
-                  <option value={selectedCustomer.id}>
-                    {selectedCustomer.name} ({isSw ? 'imeendelezwa' : 'resumed'})
-                  </option>
-                )}
-                {branchCustomers.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.phone}) • Deni: {formatTSh(c.balance)} • Kikomo: {formatTSh(c.creditLimit)}
-                  </option>
-                ))}
-              </select>
-
-              {/* Selected Customer Details & Credit Rating Pill */}
-              {selectedCustomer ? (
-                <div className="p-2.5 bg-[#F0F2FA] rounded-xl text-[11px] text-[#323130] space-y-1 border border-[#D0D5EE]">
-                  <div className="flex items-center justify-between font-semibold">
-                    <span className="font-bold text-[#0078D4] flex items-center gap-1">
-                      <User className="w-3 h-3" /> {selectedCustomer.name}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      selectedCustomer.riskScore === 'High' ? 'bg-rose-100 text-rose-700' :
-                      selectedCustomer.riskScore === 'Medium' ? 'bg-amber-100 text-amber-700' :
-                      'bg-emerald-100 text-emerald-700'
-                    }`}>
-                      {selectedCustomer.riskScore} Risk
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[10px] text-[#605E5C]">
-                    <span>{isSw ? 'Deni Lililopo:' : 'Current Debt:'} <strong className="text-[#D13438]">{formatTSh(selectedCustomer.balance)}</strong></span>
-                    <span>{isSw ? 'Mkopo Uliobaki:' : 'Available Credit:'} <strong className="text-[#107C10]">{formatTSh(Math.max(0, selectedCustomer.creditLimit - selectedCustomer.balance))}</strong></span>
-                  </div>
-                </div>
-              ) : isCreditOrPartial ? (
-                <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-[11px] text-rose-800 font-semibold flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>
-                    {isSw 
-                      ? '⚠️ Unahitaji kuchagua au kusajili mteja ili kutoa mkopo au malipo ya awamu!' 
-                      : '⚠️ Customer is required before completing credit or partial installment sales!'}
-                  </span>
-                </div>
-              ) : null}
-            </div>
-
-            {/* Cart Items List with Physical Inventory Indicators */}
-            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-              {cart.length === 0 ? (
-                <div className="py-8 text-center text-xs text-[#605E5C]">
-                  <ShoppingBag className="w-8 h-8 text-[#C8C6C4] mx-auto mb-2" />
-                  {t('cartEmpty')}
-                </div>
-              ) : (
-                cart.map(item => {
-                  const availableStock = item.product.stock;
-                  const isExceeding = item.quantity > availableStock;
-
-                  return (
-                    <div 
-                      key={item.product.id} 
-                      className={`p-2.5 rounded-lg border text-xs transition-colors ${
-                        isExceeding 
-                          ? 'bg-rose-50 border-rose-300' 
-                          : 'bg-[#FAF9F8] border-[#EDEBE9]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-1 pr-2 min-w-0">
-                          <ProductImageThumb src={item.product.imageUrl} name={item.product.name} size="sm" />
-                          <div className="min-w-0 flex-1">
-                          <div className="font-bold text-[#323130] truncate">{item.product.name}</div>
-                          <ProductMetaBadges
-                            product={item.product}
-                            businessType={businessType}
-                            language={language}
-                            variant="line"
-                            max={1}
-                          />
-                          <div className="text-[10px] text-[#605E5C] flex items-center gap-2 mt-0.5">
-                            <span>{formatTSh(item.product.price)} / {item.product.unit}</span>
-                            <span className="font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded">
-                              Stoo: {availableStock}
-                            </span>
-                          </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleUpdateQty(item.product.id, -1)}
-                            className="w-5 h-5 rounded bg-white border border-[#C8C6C4] flex items-center justify-center text-[#323130] hover:bg-slate-50 cursor-pointer"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          
-                          <input
-                            type="number"
-                            min="1"
-                            max={availableStock}
-                            value={item.quantity}
-                            onChange={e => handleDirectQtyInput(item.product.id, e.target.value)}
-                            className="w-8 text-center font-bold text-xs bg-white border border-[#EDEBE9] rounded py-0.5 outline-none"
-                          />
-
-                          <button
-                            onClick={() => handleUpdateQty(item.product.id, 1)}
-                            className="w-5 h-5 rounded bg-white border border-[#C8C6C4] flex items-center justify-center text-[#323130] hover:bg-slate-50 cursor-pointer"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => handleRemoveFromCart(item.product.id)}
-                            className="p-1 text-rose-500 hover:bg-rose-50 rounded cursor-pointer ml-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      {pricing.canApplyDiscount && (
-                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#EDEBE9]/80">
-                          <span className="text-[10px] font-semibold text-[#605E5C]">
-                            {isSw ? 'Punguzo (%)' : 'Discount (%)'}
-                            {!pricing.canApproveHighDiscount && (
-                              <span className="text-[9px] text-[#605E5C]"> · max {taxSettings.maxDiscountPercent}%</span>
-                            )}
-                          </span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={pricing.canApproveHighDiscount ? 100 : taxSettings.maxDiscountPercent}
-                            value={item.discountPercent || ''}
-                            placeholder="0"
-                            onChange={e => handleUpdateDiscount(item.product.id, e.target.value)}
-                            className="w-14 text-center text-[10px] font-bold bg-white border border-[#EDEBE9] rounded py-0.5 outline-none focus:border-[#6264A7]"
-                          />
-                        </div>
-                      )}
-                      {pricing.canOverridePrice && (
-                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#EDEBE9]/80">
-                          <span className="text-[10px] font-semibold text-[#605E5C]">
-                            {isSw ? 'Bei (kubadilisha)' : 'Unit price'}
-                          </span>
-                          <input
-                            type="number"
-                            min={1}
-                            value={item.unitPriceOverride ?? item.product.price}
-                            onChange={e => handleUpdateUnitPrice(item.product.id, e.target.value)}
-                            className="w-20 text-center text-[10px] font-bold bg-white border border-[#EDEBE9] rounded py-0.5 outline-none focus:border-[#6264A7]"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
+        {/* RIGHT CART — desktop */}
+        <div
+          className="hidden lg:flex lg:col-span-6 bg-white rounded-xl border border-[#E1DFDD] shadow-xs flex-col overflow-hidden"
+          style={{height: 'calc(100dvh - 8.5rem)', minHeight: '480px'}}
+        >
+          <div className="px-3 pt-3 pb-2 border-b border-[#F3F2F1] shrink-0 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={goToCartStep}
+              className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                posStep === 'cart' ? 'bg-[#6264A7] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
+              }`}
+            >
+              <span className="inline-flex items-center justify-center gap-1.5">
+                <ShoppingBag className="w-3.5 h-3.5" />
+                {isSw ? 'Bidhaa' : 'Items'}
+                {cart.length > 0 && <span className="opacity-90">({cart.length})</span>}
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={cart.length === 0}
+              onClick={goToPayStep}
+              className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                posStep === 'pay' ? 'bg-[#107C10] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
+              }`}
+            >
+              {isSw ? 'Malipo' : 'Pay'}
+            </button>
+            <span className="text-[11px] font-extrabold text-[#0078D4] shrink-0 tabular-nums pl-1">
+              {formatTSh(total)}
+            </span>
           </div>
 
-          {/* Checkout & Settlement Area */}
-          <div className="border-t border-[#F3F2F1] pt-3 space-y-3">
-            {/* Totals Breakdown */}
-            <div className="space-y-1 text-xs text-[#605E5C]">
-              {taxSettings.discountEnabled && taxSettings.showDiscountOnReceipts && discountAmount > 0 && (
-                <>
-                  <div className="flex justify-between">
-                    <span>{isSw ? 'Jumla kabla ya punguzo' : 'Gross subtotal'}:</span>
-                    <span className="font-semibold text-[#323130]">{formatTSh(grossSubtotal)}</span>
+          {posStep === 'cart' ? (
+            <>
+              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2 min-h-0">
+                {cart.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-[#605E5C]">
+                    <ShoppingBag className="w-8 h-8 text-[#C8C6C4] mx-auto mb-2" />
+                    {t('cartEmpty')}
                   </div>
-                  <div className="flex justify-between text-amber-700">
-                    <span>{isSw ? 'Punguzo' : 'Discount'}:</span>
-                    <span className="font-semibold">- {formatTSh(discountAmount)}</span>
-                  </div>
-                </>
-              )}
-              <div className="flex justify-between">
-                <span>{t('subtotal')}:</span>
-                <span className="font-semibold text-[#323130]">{formatTSh(subtotal)}</span>
+                ) : (
+                  cart.map(item => {
+                    const availableStock = item.product.stock;
+                    const isExceeding = item.quantity > availableStock;
+                    const lineTotal = effectiveUnitPrice(item.product.price, item.unitPriceOverride) * item.quantity * (1 - (item.discountPercent || 0) / 100);
+                    return (
+                      <div
+                        key={item.product.id}
+                        className={`p-2.5 rounded-xl border text-xs ${
+                          isExceeding ? 'bg-rose-50 border-rose-300' : 'bg-[#FAF9F8] border-[#EDEBE9]'
+                        }`}
+                      >
+                        <div className="flex gap-2.5">
+                          <ProductImageThumb src={item.product.imageUrl} name={item.product.name} size="md" className="rounded-lg" />
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-[#323130] line-clamp-2 leading-snug">{item.product.name}</div>
+                            <div className="text-[10px] text-[#605E5C] mt-0.5 flex flex-wrap gap-x-2">
+                              <span>{formatTSh(item.product.price)} / {item.product.unit}</span>
+                              <span className="font-semibold text-emerald-700">Stoo: {availableStock}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-2">
+                              <button type="button" onClick={() => handleUpdateQty(item.product.id, -1)} className="w-7 h-7 rounded-lg bg-white border border-[#C8C6C4] flex items-center justify-center cursor-pointer">
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <input
+                                type="number"
+                                min={1}
+                                max={availableStock}
+                                value={item.quantity}
+                                onChange={e => handleDirectQtyInput(item.product.id, e.target.value)}
+                                className="w-10 text-center font-bold text-xs bg-white border border-[#EDEBE9] rounded-lg py-1 outline-none"
+                              />
+                              <button type="button" onClick={() => handleUpdateQty(item.product.id, 1)} className="w-7 h-7 rounded-lg bg-white border border-[#C8C6C4] flex items-center justify-center cursor-pointer">
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="ml-auto text-[11px] font-extrabold text-[#323130] tabular-nums">
+                                {formatTSh(lineTotal)}
+                              </span>
+                              <button type="button" onClick={() => handleRemoveFromCart(item.product.id)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            {pricing.canApplyDiscount && (
+                              <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#EDEBE9]/80">
+                                <span className="text-[10px] font-semibold text-[#605E5C]">{isSw ? 'Punguzo %' : 'Discount %'}</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={pricing.canApproveHighDiscount ? 100 : taxSettings.maxDiscountPercent}
+                                  value={item.discountPercent || ''}
+                                  placeholder="0"
+                                  onChange={e => handleUpdateDiscount(item.product.id, e.target.value)}
+                                  className="w-14 text-center text-[10px] font-bold bg-white border border-[#EDEBE9] rounded py-0.5 outline-none"
+                                />
+                              </div>
+                            )}
+                            {pricing.canOverridePrice && (
+                              <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#EDEBE9]/80">
+                                <span className="text-[10px] font-semibold text-[#605E5C]">{isSw ? 'Bei' : 'Unit price'}</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={item.unitPriceOverride ?? item.product.price}
+                                  onChange={e => handleUpdateUnitPrice(item.product.id, e.target.value)}
+                                  className="w-20 text-center text-[10px] font-bold bg-white border border-[#EDEBE9] rounded py-0.5 outline-none"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-              {taxSettings.cartDiscountEnabled && pricing.canApplyDiscount && (
-                <div className="flex justify-between items-center gap-2">
-                  <span>{isSw ? 'Punguzo la gari (%)' : 'Cart discount (%)'}:</span>
+
+              <div className="px-3 py-2 border-t border-[#F3F2F1] space-y-2 shrink-0">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-[#323130]">{isSw ? 'Mteja' : 'Customer'}</label>
+                  <button type="button" onClick={() => setIsNewCustomerModalOpen(true)} className="text-[11px] font-bold text-[#0078D4] flex items-center gap-1 cursor-pointer">
+                    <UserPlus className="w-3.5 h-3.5" /> {isSw ? 'Mpya' : 'New'}
+                  </button>
+                </div>
+                <select
+                  value={selectedCustomerId}
+                  onChange={e => { setSelectedCustomerId(e.target.value); setValidationError(null); }}
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-[#F3F2F1] border border-[#EDEBE9] outline-none focus:border-[#0078D4]"
+                >
+                  <option value="">{isSw ? 'Mteja wa Taslimu' : 'Walk-in / Cash'}</option>
+                  {selectedCustomer && !branchCustomers.some(c => c.id === selectedCustomer.id) && (
+                    <option value={selectedCustomer.id}>{selectedCustomer.name}</option>
+                  )}
+                  {branchCustomers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} · {formatTSh(c.balance)}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={cart.length === 0}
+                  onClick={goToPayStep}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-[#107C10] to-[#0078D4] text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
+                >
+                  {isSw ? 'Endelea Malipo' : 'Continue to Pay'}
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col flex-1 min-h-0">
+              <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
+              <button type="button" onClick={goToCartStep} className="text-[11px] font-bold text-[#6264A7] flex items-center gap-1 cursor-pointer">
+                <ArrowLeft className="w-3.5 h-3.5" /> {isSw ? 'Rudi kwa bidhaa' : 'Back to items'}
+              </button>
+
+              <div className="rounded-xl border border-[#EDEBE9] bg-[#FAF9F8] p-2.5 max-h-40 overflow-y-auto space-y-2">
+                <div className="text-[10px] font-bold text-[#605E5C] uppercase tracking-wide">
+                  {isSw ? `Bidhaa zilizochaguliwa (${cart.length})` : `Selected items (${cart.length})`}
+                </div>
+                {cart.map(item => (
+                  <div key={item.product.id} className="flex items-center gap-2.5 text-[11px]">
+                    <ProductImageThumb src={item.product.imageUrl} name={item.product.name} size="sm" className="rounded-lg" />
+                    <span className="flex-1 min-w-0 font-semibold text-[#323130] line-clamp-2">{item.product.name}</span>
+                    <span className="text-[#605E5C] shrink-0 font-bold">×{item.quantity}</span>
+                    <span className="font-extrabold text-[#323130] shrink-0 tabular-nums">{formatTSh(effectiveUnitPrice(item.product.price, item.unitPriceOverride) * item.quantity)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-1 text-xs text-[#605E5C]">
+                <div className="flex justify-between"><span>{t('subtotal')}:</span><span className="font-semibold text-[#323130]">{formatTSh(subtotal)}</span></div>
+                {saleVatActive && saleTaxSettings.showVatOnReceipt && (
+                  <div className="flex justify-between"><span>{formatVatLabel(saleTaxSettings, isSw)}:</span><span className="font-semibold text-[#323130]">{formatTSh(vatAmount)}</span></div>
+                )}
+                {canToggleSaleVat && (
+                  <div className="flex items-center justify-between gap-2 py-1">
+                    <span className="font-semibold text-[#323130]">{isSw ? 'VAT 18%' : 'VAT 18%'}</span>
+                    <div className="grid grid-cols-2 gap-1 bg-[#F3F2F1] p-0.5 rounded-lg">
+                      <button type="button" onClick={() => setApplyVatThisSale(true)} className={`px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer ${applyVatThisSale ? 'bg-[#107C10] text-white' : 'text-[#605E5C]'}`}>{isSw ? 'Na VAT' : 'With VAT'}</button>
+                      <button type="button" onClick={() => setApplyVatThisSale(false)} className={`px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer ${!applyVatThisSale ? 'bg-[#323130] text-white' : 'text-[#605E5C]'}`}>{isSw ? 'Bila VAT' : 'No VAT'}</button>
+                    </div>
+                  </div>
+                )}
+                {canIssueTraFiscal && (
+                  <div className="py-1.5 space-y-1">
+                    <label className="block text-[11px] font-bold text-[#323130]">
+                      {isSw ? 'Aina ya Risiti' : 'Receipt Type'}
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => { setReceiptType('tra_fiscal'); setApplyVatThisSale(true); }}
+                        className={`py-2 rounded-lg text-[10px] font-bold border cursor-pointer flex items-center justify-center gap-1 ${
+                          receiptType === 'tra_fiscal'
+                            ? 'bg-[#107C10] text-white border-[#107C10]'
+                            : 'bg-white text-[#605E5C] border-[#EDEBE9]'
+                        }`}
+                      >
+                        <ShieldCheck className="w-3 h-3" />
+                        {isSw ? 'TRA Fiscal' : 'TRA Fiscal'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReceiptType('standard')}
+                        className={`py-2 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                          receiptType === 'standard'
+                            ? 'bg-[#323130] text-white border-[#323130]'
+                            : 'bg-white text-[#605E5C] border-[#EDEBE9]'
+                        }`}
+                      >
+                        {isSw ? 'Standard' : 'Standard'}
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-[#605E5C]">
+                      {receiptType === 'tra_fiscal'
+                        ? (isSw ? 'Inatumwa TRA EFD · risiti ya kisheria + QR' : 'Sent to TRA EFD · legal slip + QR')
+                        : (isSw ? 'Risiti ya kawaida — haitumwi TRA' : 'Normal receipt — not sent to TRA')}
+                    </p>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm font-extrabold text-[#323130] pt-1 border-t border-[#EDEBE9]">
+                  <span>{t('totalPayable')}:</span>
+                  <span className="text-[#0078D4] text-base tabular-nums">{formatTSh(total)}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[#323130] mb-1">
+                  {isSw ? 'Mteja' : 'Customer'}{isCreditOrPartial && <span className="text-[#D13438]"> *</span>}
+                </label>
+                <select
+                  value={selectedCustomerId}
+                  onChange={e => { setSelectedCustomerId(e.target.value); setValidationError(null); }}
+                  className={`w-full px-3 py-2 text-xs rounded-lg outline-none ${
+                    isCustomerMissingForCredit ? 'bg-rose-50 border-2 border-rose-400' : 'bg-[#F3F2F1] border border-[#EDEBE9]'
+                  }`}
+                >
+                  <option value="">{isSw ? 'Mteja wa Taslimu' : 'Walk-in / Cash'}</option>
+                  {branchCustomers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} · Deni {formatTSh(c.balance)}</option>
+                  ))}
+                </select>
+                {isCustomerMissingForCredit && (
+                  <p className="mt-1 text-[10px] text-rose-700 font-semibold">{isSw ? 'Chagua mteja kwa mkopo/awamu' : 'Select a customer for credit/partial'}</p>
+                )}
+              </div>
+
+              {pricing.canUsePartialPayment && (
+                <div>
+                  <label className="block text-[11px] font-bold text-[#323130] mb-1">{t('paymentType')}</label>
+                  <div className="grid grid-cols-3 gap-1.5 text-xs">
+                    {(['full', 'partial', 'credit'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => {
+                          setPaymentMode(mode);
+                          setValidationError(null);
+                          if (mode !== 'partial') setAmountPaidInput('');
+                        }}
+                        className={`py-2 rounded-lg font-semibold cursor-pointer ${
+                          paymentMode === mode ? 'bg-[#6264A7] text-white font-bold' : 'bg-[#F3F2F1] text-[#605E5C]'
+                        }`}
+                      >
+                        {mode === 'full' ? (isSw ? 'Kamili' : 'Full') : mode === 'partial' ? (isSw ? 'Awamu' : 'Partial') : (isSw ? 'Mkopo' : 'Credit')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {paymentMode !== 'credit' && (
+                <div>
+                  <label className="block text-[11px] font-bold text-[#323130] mb-1">{isSw ? 'Njia ya Malipo' : 'Payment Method'}</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs">
+                    {[
+                      { key: 'cash', label: isSw ? 'Taslimu' : 'Cash' },
+                      { key: 'mpesa', label: 'M-Pesa' },
+                      { key: 'airtel', label: 'Airtel' },
+                      { key: 'card', label: isSw ? 'Kadi' : 'Card' },
+                    ].map(m => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => setSelectedPaymentMethod(m.key as PaymentMethod)}
+                        className={`py-2 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                          selectedPaymentMethod === m.key
+                            ? 'bg-[#0078D4] text-white border-[#0078D4]'
+                            : 'bg-[#FAF9F8] border-[#EDEBE9] text-[#605E5C]'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {needsDueDate && (
+                <div className="p-2 bg-orange-50/70 rounded-lg border border-orange-200 space-y-1">
+                  <label className="block text-[11px] font-bold text-[#323130]">
+                    {isSw ? 'Tarehe ya Malipo *' : 'Payment Due Date *'}
+                  </label>
                   <input
-                    type="number"
-                    min={0}
-                    max={taxSettings.maxDiscountPercent}
-                    value={cartDiscountPercent}
-                    onChange={e => setCartDiscountPercent(capDiscountPercent(Number(e.target.value) || 0, taxSettings))}
-                    className="w-16 px-2 py-0.5 border border-[#C8C6C4] rounded text-right font-semibold text-[#323130]"
+                    type="date"
+                    min={todayIsoDate()}
+                    value={paymentDueDate}
+                    onChange={e => {
+                      const next = e.target.value;
+                      setPaymentDueDate(next);
+                      setValidationError(next && validatePaymentDueDate(next, isSw) ? validatePaymentDueDate(next, isSw) : null);
+                    }}
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-[#EDEBE9] rounded-lg outline-none font-semibold"
                   />
                 </div>
               )}
-              {!canToggleSaleVat && taxSettings.mode !== 'tra_efd' && (
-                <p className="text-[10px] text-[#8A8886] leading-snug py-0.5">
-                  {isSw
-                    ? 'Chaguo la Na VAT / Bila VAT linaonekana tu duka lililosajiliwa VAT (Mipangilio → TRA/VAT). Hakikisha tawi halibatilishi hali ya VAT.'
-                    : 'With VAT / No VAT appears only when the shop is VAT-registered (Settings → TRA/VAT). Ensure the branch inherits org VAT status.'}
-                </p>
-              )}
-              {canToggleSaleVat && (
-                <div className="flex items-center justify-between gap-2 py-1">
-                  <span className="font-semibold text-[#323130]">{isSw ? 'VAT 18% kwenye mauzo' : 'VAT 18% on this sale'}</span>
-                  <div className="grid grid-cols-2 gap-1 bg-[#F3F2F1] p-0.5 rounded-lg">
-                    <button
-                      type="button"
-                      onClick={() => setApplyVatThisSale(true)}
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer transition-colors ${
-                        applyVatThisSale ? 'bg-[#107C10] text-white shadow-sm' : 'text-[#605E5C] hover:text-[#323130]'
-                      }`}
-                    >
-                      {isSw ? 'Na VAT' : 'With VAT'}
+              </div>
+
+              {/* Sticky footer: partial amount always fully visible + pay actions */}
+              <div className="shrink-0 border-t border-[#E1DFDD] bg-white px-3 py-3 space-y-2.5 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
+              {paymentMode === 'partial' && (
+                <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-extrabold text-amber-950">
+                      {isSw ? 'Kiasi anacholipa SASA' : 'Amount paying NOW'}
+                    </div>
+                    <div className="text-[11px] font-bold text-[#0078D4] tabular-nums">{formatTSh(total)}</div>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-[#605E5C]">TSh</span>
+                    <input
+                      ref={partialAmountRef}
+                      type="text"
+                      inputMode="decimal"
+                      placeholder={isSw ? 'Andika kiasi...' : 'Enter amount...'}
+                      value={amountPaidInput}
+                      onChange={e => setPartialAmount(e.target.value)}
+                      className="w-full pl-12 pr-3 py-3 text-lg font-extrabold bg-white border-2 border-amber-400 rounded-xl focus:border-[#0078D4] outline-none text-right text-[#0078D4] tabular-nums"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setPartialAmount(String(Math.round(total / 2)))} className="flex-1 py-1.5 rounded-lg text-[10px] font-bold bg-white border border-amber-200 text-amber-900 cursor-pointer">
+                      {isSw ? 'Nusu' : 'Half'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setApplyVatThisSale(false)}
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer transition-colors ${
-                        !applyVatThisSale ? 'bg-[#323130] text-white shadow-sm' : 'text-[#605E5C] hover:text-[#323130]'
-                      }`}
-                    >
-                      {isSw ? 'Bila VAT' : 'No VAT'}
+                    <button type="button" onClick={() => setPartialAmount('')} className="flex-1 py-1.5 rounded-lg text-[10px] font-bold bg-white border border-amber-200 text-amber-900 cursor-pointer">
+                      {isSw ? 'Futa' : 'Clear'}
                     </button>
                   </div>
+                  {Number(amountPaidInput) > 0 && Number(amountPaidInput) < total && (
+                    <div className="flex justify-between rounded-lg bg-rose-100 border border-rose-300 px-2.5 py-1.5 text-[11px]">
+                      <span className="font-bold text-rose-800">{isSw ? 'Deni litakalobaki' : 'Balance remaining'}</span>
+                      <span className="font-extrabold text-rose-700 tabular-nums">{formatTSh(balanceRemaining)}</span>
+                    </div>
+                  )}
                 </div>
               )}
-              {saleVatActive && saleTaxSettings.showVatOnReceipt && (
-                <div className="flex justify-between">
-                  <span>{formatVatLabel(saleTaxSettings, isSw)}:</span>
-                  <span className="font-semibold text-[#323130]">{formatTSh(vatAmount)}</span>
-                </div>
-              )}
-              {!saleVatActive && canToggleSaleVat && (
-                <div className="flex justify-between text-[10px] text-[#8A8886]">
-                  <span>{isSw ? 'Mauzo bila VAT' : 'Sale without VAT'}</span>
-                  <span>TSh 0</span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm font-extrabold text-[#323130] pt-1 border-t border-[#EDEBE9]">
-                <span>{t('totalPayable')}:</span>
-                <span className="text-[#0078D4] text-base">{formatTSh(total)}</span>
-              </div>
-            </div>
 
-            {/* Payment Mode Selector: Full / Partial / Credit */}
-            {pricing.canUsePartialPayment && (
-            <div>
-              <label className="block text-[11px] font-bold text-[#323130] mb-1">{t('paymentType')}</label>
-              <div className="grid grid-cols-3 gap-1.5 text-xs">
-                {(['full', 'partial', 'credit'] as const).map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => {
-                      setPaymentMode(mode);
-                      setValidationError(null);
-                    }}
-                    className={`py-1.5 rounded-lg font-semibold text-xs transition-all cursor-pointer ${
-                      paymentMode === mode
-                        ? 'bg-[#6264A7] text-white shadow-xs font-bold'
-                        : 'bg-[#F3F2F1] text-[#605E5C] hover:text-[#323130]'
-                    }`}
-                  >
-                    {mode === 'full' ? (isSw ? 'Taslimu (Full)' : 'Full') : 
-                     mode === 'partial' ? (isSw ? 'Awamu (Partial)' : 'Partial') : 
-                     (isSw ? 'Mkopo (Credit)' : 'Credit Sale')}
-                  </button>
-                ))}
-              </div>
-            </div>
-            )}
-
-            {/* Payment Method Selector */}
-            {paymentMode !== 'credit' && (
-              <div>
-                <label className="block text-[11px] font-bold text-[#323130] mb-1">
-                  {isSw ? 'Njia ya Malipo' : 'Payment Method'}
-                </label>
-                <div className="grid grid-cols-4 gap-1 text-xs">
-                  {[
-                    { key: 'cash', label: '💵 Cash' },
-                    { key: 'mpesa', label: '📱 M-Pesa' },
-                    { key: 'airtel', label: '🔴 Airtel' },
-                    { key: 'card', label: '💳 Card' },
-                  ].map(m => (
-                    <button
-                      key={m.key}
-                      onClick={() => setSelectedPaymentMethod(m.key as PaymentMethod)}
-                      className={`py-1 rounded-md text-[11px] font-medium border transition-all cursor-pointer ${
-                        selectedPaymentMethod === m.key
-                          ? 'bg-[#0078D4] text-white border-[#0078D4] font-bold'
-                          : 'bg-[#FAF9F8] border-[#EDEBE9] text-[#605E5C]'
-                      }`}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Amount Paid input if partial */}
-            {paymentMode === 'partial' && (
-              <div className="p-2 bg-amber-50/60 rounded-lg border border-amber-200">
-                <label className="block text-[11px] font-bold text-[#323130] mb-1">
-                  {isSw ? 'Kiasi cha Awamu ya Kwanza (Down Payment)' : 'Initial Down Payment (TSh)'}
-                </label>
-                <input
-                  type="number"
-                  placeholder="e.g. 50000"
-                  value={amountPaidInput}
-                  onChange={e => setAmountPaidInput(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs bg-white border border-[#EDEBE9] rounded-lg focus:border-[#0078D4] outline-none font-bold"
-                />
-                {balanceRemaining > 0 && (
-                  <div className="text-[10px] text-[#D13438] font-bold mt-1">
-                    {isSw 
-                      ? `Salio la ${formatTSh(balanceRemaining)} litaandikwa kama deni kwa mteja.`
-                      : `Remaining ${formatTSh(balanceRemaining)} will be posted to customer credit balance.`}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {needsDueDate && (
-              <div className="p-2 bg-orange-50/70 rounded-lg border border-orange-200 space-y-1">
-                <label className="block text-[11px] font-bold text-[#323130]">
-                  {isSw ? 'Tarehe ya Malipo (Due Date) *' : 'Payment Due Date *'}
-                </label>
-                <input
-                  type="date"
-                  required
-                  min={todayIsoDate()}
-                  value={paymentDueDate}
-                  onChange={e => {
-                    const next = e.target.value;
-                    if (next && validatePaymentDueDate(next, isSw)) {
-                      setValidationError(validatePaymentDueDate(next, isSw));
-                    } else {
-                      setValidationError(null);
-                    }
-                    setPaymentDueDate(next);
-                  }}
-                  className="w-full px-3 py-1.5 text-xs bg-white border border-[#EDEBE9] rounded-lg focus:border-[#0078D4] outline-none font-semibold"
-                />
-                <p className="text-[10px] text-[#605E5C]">
-                  {isSw
-                    ? 'Haiwezekani kuweka tarehe ya zamani. Inaonekana kwenye risiti, ankara, na ripoti za madeni.'
-                    : 'Past dates are not allowed. Shown on receipt, invoice, and receivables.'}
-                  {paymentDueDate ? ` · ${formatDueDateDisplay(paymentDueDate)}` : ''}
-                </p>
-              </div>
-            )}
-
-            {/* Park vs complete — two clearly different sale paths */}
-            <p className="text-[10px] text-[#605E5C] leading-snug px-0.5">
-              {isSw
-                ? 'Chagua moja: Lipa & Kamilisha = mauzo ya kawaida yenye malipo sasa. Hifadhi Bila Malipo = weka foleni, malipo baadaye.'
-                : 'Choose one: Take Payment & Finish = normal sale with payment now. Park Sale = hold cart for later payment.'}
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                id="btn-save-and-next"
-                type="button"
-                disabled={cart.length === 0}
-                onClick={handleSaveAndNext}
-                title={isSw ? 'Hifadhi bila malipo — mteja anayefuata' : 'Park sale without payment — serve next customer'}
-                className={`py-2.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 shadow-md transition-all active:scale-[0.98] ${
-                  cart.length === 0
-                    ? 'bg-[#EDEBE9] text-[#A19F9D] cursor-not-allowed'
-                    : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white hover:brightness-105 cursor-pointer'
-                }`}
-              >
-                <span className="flex items-center gap-1.5">
-                  <Clock className="w-4 h-4" />
-                  {isSw ? 'Hifadhi Bila Malipo' : 'Park Sale (No Payment)'}
-                </span>
-                <span className={`text-[9px] font-semibold ${cart.length === 0 ? 'opacity-60' : 'opacity-90'}`}>
-                  {isSw ? 'Malipo baadaye · mteja mpya' : 'Pay later · next customer'}
-                </span>
-              </button>
-              <button
-                id="btn-complete-sale"
-                disabled={cart.length === 0}
-                onClick={handleExecuteSale}
-                title={isSw ? 'Mauzo ya kawaida — chukua malipo sasa' : 'Normal sale — take payment now'}
-                className={`py-2.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 shadow-md transition-all active:scale-[0.98] ${
-                  cart.length === 0
-                    ? 'bg-[#EDEBE9] text-[#A19F9D] cursor-not-allowed'
-                    : isCustomerMissingForCredit
-                      ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white cursor-pointer hover:brightness-105'
-                      : 'bg-gradient-to-r from-[#107C10] to-[#0078D4] text-white hover:brightness-105 cursor-pointer'
-                }`}
-              >
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {isCustomerMissingForCredit
-                    ? (isSw ? '⚠️ Chagua Mteja' : '⚠️ Select Customer')
-                    : (isSw ? 'Lipa & Kamilisha' : 'Take Payment & Finish')}
-                </span>
-                {!isCustomerMissingForCredit && (
-                  <span className={`text-[9px] font-semibold ${cart.length === 0 ? 'opacity-60' : 'opacity-90'}`}>
-                    {isSw ? 'Mauzo ya kawaida · malipo sasa' : 'Normal sale · payment now'}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={cart.length === 0}
+                  onClick={handleSaveAndNext}
+                  className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 ${
+                    cart.length === 0 ? 'bg-[#EDEBE9] text-[#A19F9D]' : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white cursor-pointer'
+                  }`}
+                >
+                  <span className="flex items-center gap-1"><Clock className="w-4 h-4" />{isSw ? 'Hifadhi' : 'Park'}</span>
+                  <span className="text-[9px] opacity-90">{isSw ? 'Malipo baadaye' : 'Pay later'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={cart.length === 0}
+                  onClick={handleExecuteSale}
+                  className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 ${
+                    cart.length === 0
+                      ? 'bg-[#EDEBE9] text-[#A19F9D]'
+                      : isCustomerMissingForCredit
+                        ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white cursor-pointer'
+                        : 'bg-gradient-to-r from-[#107C10] to-[#0078D4] text-white cursor-pointer'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4" />
+                    {isCustomerMissingForCredit ? (isSw ? 'Chagua Mteja' : 'Select Customer') : (isSw ? 'Lipa sasa' : 'Take Payment')}
                   </span>
-                )}
-              </button>
+                  <span className="text-[9px] opacity-90">{formatTSh(paymentMode === 'partial' ? Math.min(Number(amountPaidInput) || 0, total) : paymentMode === 'credit' ? 0 : total)}</span>
+                </button>
+              </div>
+              {pendingCount > 0 && onOpenPending && (
+                <button type="button" onClick={onOpenPending} className="w-full py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold cursor-pointer flex items-center justify-center gap-2">
+                  <Clock className="w-3.5 h-3.5" />
+                  {isSw ? `${pendingCount} yanasubiri malipo` : `${pendingCount} awaiting payment`}
+                </button>
+              )}
+              </div>
             </div>
-            {pendingCount > 0 && onOpenPending && (
-              <button
-                type="button"
-                onClick={onOpenPending}
-                className="w-full py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Clock className="w-3.5 h-3.5" />
-                {isSw
-                  ? `${pendingCount} mauzo yanasubiri malipo — bofya kukamilisha`
-                  : `${pendingCount} sale(s) awaiting payment — tap to complete`}
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* ON-THE-FLY CUSTOMER CREATION MODAL DIRECTLY AT POS REGISTER               */}
-      {/* ========================================================================= */}
-      {isNewCustomerModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-[#E1DFDD] space-y-4">
+      {/* Mobile sticky cart bar (above bottom nav) */}
+      <div className="lg:hidden fixed left-0 right-0 z-40 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pointer-events-none" style={{ bottom: 'calc(3.75rem + env(safe-area-inset-bottom, 0px))' }}>
+        <button
+          type="button"
+          onClick={() => { setMobileCartOpen(true); if (cart.length === 0) setPosStep('cart'); }}
+          className="pointer-events-auto w-full max-w-lg mx-auto flex items-center gap-3 rounded-2xl bg-[#24284A] text-white px-4 py-3 shadow-xl border border-white/10 cursor-pointer"
+        >
+          <span className="relative">
+            <ShoppingBag className="w-5 h-5" />
+            {cartItemCount > 0 && (
+              <span className="absolute -top-2 -right-2 min-w-[1.1rem] h-4 px-0.5 rounded-full bg-amber-400 text-[#24284A] text-[9px] font-black flex items-center justify-center">
+                {cartItemCount > 99 ? '99+' : cartItemCount}
+              </span>
+            )}
+          </span>
+          <span className="flex-1 text-left text-xs font-bold">
+            {cart.length === 0
+              ? (isSw ? 'Kikapu kitupu' : 'Cart empty')
+              : (isSw ? `${cart.length} bidhaa` : `${cart.length} items`)}
+          </span>
+          <span className="text-sm font-extrabold tabular-nums">{formatTSh(total)}</span>
+          <ChevronUp className="w-4 h-4 opacity-80" />
+        </button>
+      </div>
+
+      {/* Mobile cart / pay bottom sheet */}
+      {mobileCartOpen && (
+        <div className="lg:hidden fixed inset-0 z-[60] flex flex-col justify-end">
+          <button type="button" className="absolute inset-0 bg-black/45 cursor-pointer" aria-label="Close" onClick={() => setMobileCartOpen(false)} />
+          <div className="relative bg-white rounded-t-3xl shadow-2xl max-h-[88dvh] flex flex-col animate-in slide-in-from-bottom duration-200">
+            <div className="flex justify-center pt-2 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-[#C8C6C4]" />
+            </div>
+            <div className="px-4 pb-2 flex items-center justify-between shrink-0 border-b border-[#F3F2F1]">
+              <div className="flex gap-1 p-0.5 bg-[#F3F2F1] rounded-xl">
+                <button type="button" onClick={goToCartStep} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${posStep === 'cart' ? 'bg-white shadow-sm text-[#323130]' : 'text-[#605E5C]'}`}>
+                  {isSw ? 'Bidhaa' : 'Items'}
+                </button>
+                <button type="button" disabled={cart.length === 0} onClick={goToPayStep} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer disabled:opacity-40 ${posStep === 'pay' ? 'bg-white shadow-sm text-[#107C10]' : 'text-[#605E5C]'}`}>
+                  {isSw ? 'Malipo' : 'Pay'}
+                </button>
+              </div>
+              <button type="button" onClick={() => setMobileCartOpen(false)} className="p-2 rounded-lg text-[#605E5C] cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {posStep === 'cart' ? (
+                <>
+                  {cart.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-[#605E5C]">{t('cartEmpty')}</div>
+                  ) : (
+                    cart.map(item => (
+                      <div key={item.product.id} className="flex gap-3 p-2.5 rounded-xl bg-[#FAF9F8] border border-[#EDEBE9]">
+                        <ProductImageThumb src={item.product.imageUrl} name={item.product.name} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold text-[#323130] line-clamp-2">{item.product.name}</div>
+                          <div className="text-[10px] text-[#605E5C]">{formatTSh(item.product.price)}</div>
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <button type="button" onClick={() => handleUpdateQty(item.product.id, -1)} className="w-8 h-8 rounded-lg border bg-white flex items-center justify-center cursor-pointer"><Minus className="w-3.5 h-3.5" /></button>
+                            <span className="font-bold text-sm w-6 text-center">{item.quantity}</span>
+                            <button type="button" onClick={() => handleUpdateQty(item.product.id, 1)} className="w-8 h-8 rounded-lg border bg-white flex items-center justify-center cursor-pointer"><Plus className="w-3.5 h-3.5" /></button>
+                            <button type="button" onClick={() => handleRemoveFromCart(item.product.id)} className="ml-auto p-2 text-rose-500 cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  <select
+                    value={selectedCustomerId}
+                    onChange={e => setSelectedCustomerId(e.target.value)}
+                    className="w-full px-3 py-2.5 text-xs rounded-xl bg-[#F3F2F1] border border-[#EDEBE9]"
+                  >
+                    <option value="">{isSw ? 'Mteja wa Taslimu' : 'Walk-in / Cash'}</option>
+                    {branchCustomers.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={cart.length === 0}
+                    onClick={goToPayStep}
+                    className="w-full py-3.5 rounded-2xl bg-[#107C10] text-white font-bold text-sm disabled:opacity-40 cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {isSw ? 'Endelea Malipo' : 'Continue to Pay'} <ArrowRight className="w-4 h-4" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-xl bg-[#FAF9F8] border border-[#EDEBE9] p-2 space-y-1 max-h-24 overflow-y-auto">
+                    {cart.map(item => (
+                      <div key={item.product.id} className="flex justify-between text-[11px] gap-2">
+                        <span className="truncate font-semibold">{item.product.name} ×{item.quantity}</span>
+                        <span className="font-bold shrink-0 tabular-nums">{formatTSh(effectiveUnitPrice(item.product.price, item.unitPriceOverride) * item.quantity)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-sm font-extrabold">
+                    <span>{t('totalPayable')}</span>
+                    <span className="text-[#0078D4] tabular-nums">{formatTSh(total)}</span>
+                  </div>
+                  {pricing.canUsePartialPayment && (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(['full', 'partial', 'credit'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => { setPaymentMode(mode); if (mode !== 'partial') setAmountPaidInput(''); }}
+                          className={`py-2.5 rounded-xl text-[11px] font-bold cursor-pointer ${paymentMode === mode ? 'bg-[#6264A7] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'}`}
+                        >
+                          {mode === 'full' ? (isSw ? 'Kamili' : 'Full') : mode === 'partial' ? (isSw ? 'Awamu' : 'Partial') : (isSw ? 'Mkopo' : 'Credit')}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {paymentMode === 'partial' && (
+                    <div className="space-y-2 rounded-xl border-2 border-amber-300 bg-amber-50 p-3">
+                      <label className="text-[11px] font-extrabold text-amber-950 block">
+                        {isSw ? 'Kiasi anacholipa SASA' : 'Amount paying NOW'}
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-[#605E5C]">TSh</span>
+                        <input
+                          ref={partialAmountRef}
+                          type="text"
+                          inputMode="decimal"
+                          value={amountPaidInput}
+                          onChange={e => setPartialAmount(e.target.value)}
+                          placeholder="0"
+                          className="w-full pl-12 pr-3 py-3.5 text-xl font-extrabold bg-white border-2 border-amber-400 rounded-xl outline-none text-right text-[#0078D4] tabular-nums"
+                        />
+                      </div>
+                      {balanceRemaining > 0 && Number(amountPaidInput) > 0 && Number(amountPaidInput) < total && (
+                        <div className="text-[11px] font-bold text-rose-700 flex justify-between">
+                          <span>{isSw ? 'Deni litakalobaki' : 'Balance left'}</span>
+                          <span className="tabular-nums">{formatTSh(balanceRemaining)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {paymentMode !== 'credit' && (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { key: 'cash', label: isSw ? 'Taslimu' : 'Cash' },
+                        { key: 'mpesa', label: 'M-Pesa' },
+                        { key: 'airtel', label: 'Airtel' },
+                        { key: 'card', label: isSw ? 'Kadi' : 'Card' },
+                      ].map(m => (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => setSelectedPaymentMethod(m.key as PaymentMethod)}
+                          className={`py-2.5 rounded-xl text-[11px] font-bold border cursor-pointer ${
+                            selectedPaymentMethod === m.key ? 'bg-[#0078D4] text-white border-[#0078D4]' : 'bg-white border-[#EDEBE9] text-[#605E5C]'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {canIssueTraFiscal && (
+                    <div className="space-y-1">
+                      <p className="text-[11px] font-bold text-[#323130]">{isSw ? 'Aina ya Risiti' : 'Receipt Type'}</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => { setReceiptType('tra_fiscal'); setApplyVatThisSale(true); }}
+                          className={`py-2.5 rounded-xl text-[11px] font-bold cursor-pointer flex items-center justify-center gap-1 ${
+                            receiptType === 'tra_fiscal' ? 'bg-[#107C10] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
+                          }`}
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" /> TRA Fiscal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReceiptType('standard')}
+                          className={`py-2.5 rounded-xl text-[11px] font-bold cursor-pointer ${
+                            receiptType === 'standard' ? 'bg-[#323130] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
+                          }`}
+                        >
+                          Standard
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {(isCreditOrPartial || needsDueDate) && (
+                    <select
+                      value={selectedCustomerId}
+                      onChange={e => setSelectedCustomerId(e.target.value)}
+                      className={`w-full px-3 py-2.5 text-xs rounded-xl ${isCustomerMissingForCredit ? 'border-2 border-rose-400 bg-rose-50' : 'bg-[#F3F2F1] border border-[#EDEBE9]'}`}
+                    >
+                      <option value="">{isSw ? 'Chagua mteja *' : 'Select customer *'}</option>
+                      {branchCustomers.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {needsDueDate && (
+                    <input
+                      type="date"
+                      min={todayIsoDate()}
+                      value={paymentDueDate}
+                      onChange={e => setPaymentDueDate(e.target.value)}
+                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-[#EDEBE9]"
+                    />
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={handleSaveAndNext} className="py-3.5 rounded-2xl bg-amber-500 text-white font-bold text-xs cursor-pointer">
+                      {isSw ? 'Hifadhi' : 'Park'}
+                    </button>
+                    <button type="button" onClick={handleExecuteSale} className="py-3.5 rounded-2xl bg-[#107C10] text-white font-bold text-xs cursor-pointer">
+                      {isSw ? 'Lipa sasa' : 'Take Payment'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* ON-THE-FLY CUSTOMER CREATION MODAL */}
+      <ModalPortal open={isNewCustomerModalOpen} onClose={() => setIsNewCustomerModalOpen(false)} zClassName="z-[10060]">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-[#E1DFDD] space-y-4 mx-auto">
             <div className="flex items-center justify-between border-b border-[#F3F2F1] pb-3">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-xl bg-[#6264A7]/10 text-[#6264A7]">
@@ -1491,7 +1732,7 @@ export const POSView: React.FC<POSViewProps> = ({
                   </p>
                 </div>
               </div>
-              <button onClick={() => setIsNewCustomerModalOpen(false)} className="text-[#605E5C] hover:text-[#323130]">
+              <button type="button" onClick={() => setIsNewCustomerModalOpen(false)} className="text-[#605E5C] hover:text-[#323130] cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1564,166 +1805,199 @@ export const POSView: React.FC<POSViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsNewCustomerModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-[#F3F2F1] text-[#323130] font-semibold text-xs"
+                  className="px-4 py-2.5 rounded-xl bg-[#F3F2F1] text-[#323130] font-semibold text-xs cursor-pointer"
                 >
                   {isSw ? 'Ghairi' : 'Cancel'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
-      )}
+      </ModalPortal>
 
-      {/* COMPLETED SALE RECEIPT PREVIEW (INLINE DIALOG) */}
-      {lastCompletedSale && (
-        <div className="bg-white rounded-xl p-6 border-2 border-[#107C10] shadow-xl max-w-md mx-auto space-y-4 text-xs">
-          <div className="flex items-center justify-between border-b border-[#F3F2F1] pb-3">
-            <div className="flex items-center gap-2 text-[#107C10] font-bold">
-              <CheckCircle2 className="w-5 h-5" />
+      {/* COMPLETED SALE RECEIPT — portal above product grid */}
+      <ModalPortal
+        open={!!lastCompletedSale}
+        onClose={() => { setLastCompletedSale(null); setLastTraReceipt(null); }}
+        zClassName="z-[10070]"
+      >
+        {lastCompletedSale && (
+        <div className={`bg-white rounded-2xl p-4 sm:p-5 border-2 shadow-2xl w-full mx-auto relative z-10 mt-[4vh] sm:mt-[6vh] ${
+          lastTraReceipt ? 'border-[#107C10] max-w-3xl' : 'border-[#107C10] max-w-md space-y-4 text-xs'
+        }`}>
+          <div className="flex items-center justify-between border-b border-[#F3F2F1] pb-3 mb-3">
+            <div className="flex items-center gap-2 text-[#107C10] font-bold text-sm">
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
               <span>
-                {taxSettings.mode === 'tra_efd'
-                  ? (isSw ? 'Risiti ya TRA EFD Imetolewa' : 'TRA EFD Receipt Issued')
-                  : (isSw ? 'Risiti ya Mauzo Imetolewa' : 'Sales Receipt Issued')}
+                {lastTraReceipt
+                  ? (isSw ? 'Malipo yamefanikiwa · Risiti ya TRA' : 'Payment Successful · TRA Receipt')
+                  : (isSw ? 'Malipo yamefanikiwa · Risiti ya kawaida' : 'Payment Successful · Standard Receipt')}
               </span>
             </div>
-            <button onClick={() => setLastCompletedSale(null)} className="text-[#605E5C]">
+            <button type="button" onClick={() => { setLastCompletedSale(null); setLastTraReceipt(null); }} className="text-[#605E5C] cursor-pointer p-1">
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="text-center font-mono text-[#323130] space-y-1">
-            <div className="font-extrabold text-sm">{taxSettings.receiptBusinessName || (isSw ? workplace.label_sw : workplace.label_en)}</div>
-            {(taxSettings.tinNumber || taxSettings.vrnNumber) && (
-              <div>
-                {taxSettings.tinNumber ? `TIN: ${taxSettings.tinNumber}` : ''}
-                {taxSettings.tinNumber && taxSettings.vrnNumber ? ' • ' : ''}
-                {taxSettings.vrnNumber ? `VRN: ${taxSettings.vrnNumber}` : ''}
-              </div>
-            )}
-            <div>RECEIPT NO: {lastCompletedSale.receiptNumber}</div>
-            <div>CUSTOMER: {lastCompletedSale.customerName || 'Walk-in'}</div>
-            <div>DATE: {lastCompletedSale.date}</div>
-          </div>
-
-          <div className="border-t border-b border-dashed border-[#C8C6C4] py-2 space-y-1">
-            {lastCompletedSale.items.map((it, idx) => (
-              <div key={idx} className="flex justify-between gap-2">
-                <span className="min-w-0">
-                  {it.productName} (x{it.quantity})
-                  {(it.discountPercent ?? 0) > 0 && taxSettings.discountEnabled && (
-                    <span className="text-amber-700"> · -{it.discountPercent}%</span>
-                  )}
-                </span>
-                <span className="font-mono shrink-0">{formatTSh(it.total)}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-1 font-mono">
-            {taxSettings.discountEnabled &&
-              taxSettings.showDiscountOnReceipts &&
-              computeSaleDiscountAmount(lastCompletedSale) > 0 && (
-                <>
-                  <div className="flex justify-between">
-                    <span>{isSw ? 'JUMLA KABLA YA PUNGUZO:' : 'GROSS SUBTOTAL:'}</span>
-                    <span>{formatTSh(saleGrossSubtotal(lastCompletedSale))}</span>
-                  </div>
-                  <div className="flex justify-between text-amber-700 font-bold">
-                    <span>{isSw ? 'PUNGUZO:' : 'DISCOUNT:'}</span>
-                    <span>- {formatTSh(computeSaleDiscountAmount(lastCompletedSale))}</span>
-                  </div>
-                </>
-              )}
-            <div className="flex justify-between">
-              <span>SUBTOTAL (EXCL VAT):</span>
-              <span>{formatTSh(lastCompletedSale.subtotal)}</span>
-            </div>
-            {vatActive && taxSettings.showVatOnReceipt && (
-              <div className="flex justify-between">
-                <span>{formatVatLabel(taxSettings, isSw).toUpperCase()}:</span>
-                <span>{formatTSh(lastCompletedSale.vatAmount)}</span>
-              </div>
-            )}
-            <div className="flex justify-between font-bold text-sm text-[#323130] pt-1 border-t border-[#EDEBE9]">
-              <span>TOTAL INCL VAT:</span>
-              <span>{formatTSh(lastCompletedSale.total)}</span>
-            </div>
-            <div className="flex justify-between text-[#107C10] font-bold">
-              <span>PAID ({lastCompletedSale.payments[0]?.method.toUpperCase()}):</span>
-              <span>{formatTSh(lastCompletedSale.paidAmount)}</span>
-            </div>
-            {lastCompletedSale.balanceRemaining > 0 && (
-              <>
-                <div className="flex justify-between text-[#D13438] font-bold">
-                  <span>POSTED TO CREDIT BALANCE:</span>
-                  <span>{formatTSh(lastCompletedSale.balanceRemaining)}</span>
+          {lastTraReceipt ? (
+            <div className="grid lg:grid-cols-[220px_1fr] gap-4 items-start">
+              <div className="space-y-3">
+                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+                  <div className="text-[10px] font-bold uppercase text-emerald-800">{isSw ? 'Jumla' : 'Amount'}</div>
+                  <div className="text-lg font-extrabold text-emerald-900 tabular-nums">{formatTSh(lastCompletedSale.total)}</div>
                 </div>
-                {lastCompletedSale.paymentDueDate && (
-                  <div className="flex justify-between text-[#E65100] font-bold">
-                    <span>{isSw ? 'TAREHE YA MALIPO:' : 'PAYMENT DUE:'}</span>
-                    <span>{formatDueDateDisplay(lastCompletedSale.paymentDueDate)}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    printTraFiscalSlip(
+                      lastTraReceipt,
+                      taxSettings,
+                      {
+                        mobile: currentUser?.phone,
+                        serialNumber: efdSettings.deviceId || taxSettings.traEfdSerial,
+                        datetimeIso: lastCompletedSale.date,
+                      },
+                      isSw,
+                    );
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-white border border-[#E1DFDD] text-[#323130] font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer hover:bg-[#F3F2F1]"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  {isSw ? 'Chapisha Risiti Kamili' : 'Print Full Receipt'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLastCompletedSale(null); setLastTraReceipt(null); }}
+                  className="w-full py-2.5 rounded-xl bg-[#6264A7] text-white font-bold text-xs cursor-pointer"
+                >
+                  {isSw ? 'Oda Mpya' : 'New Order'}
+                </button>
+              </div>
+              <div className="rounded-xl border border-[#E1DFDD] bg-[#FAF9F8] p-3 max-h-[70vh] overflow-y-auto">
+                <TraFiscalSlipPreview
+                  receipt={lastTraReceipt}
+                  tax={taxSettings}
+                  meta={{
+                    mobile: currentUser?.phone,
+                    serialNumber: efdSettings.deviceId || taxSettings.traEfdSerial,
+                    datetimeIso: lastCompletedSale.date,
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 text-xs">
+              <div className="text-center font-mono text-[#323130] space-y-1">
+                <div className="font-extrabold text-sm">{taxSettings.receiptBusinessName || (isSw ? workplace.label_sw : workplace.label_en)}</div>
+                {(taxSettings.tinNumber || taxSettings.vrnNumber) && (
+                  <div>
+                    {taxSettings.tinNumber ? `TIN: ${taxSettings.tinNumber}` : ''}
+                    {taxSettings.tinNumber && taxSettings.vrnNumber ? ' • ' : ''}
+                    {taxSettings.vrnNumber ? `VRN: ${taxSettings.vrnNumber}` : ''}
                   </div>
                 )}
-              </>
-            )}
-          </div>
+                <div>RECEIPT NO: {lastCompletedSale.receiptNumber}</div>
+                <div>CUSTOMER: {lastCompletedSale.customerName || 'Walk-in'}</div>
+                <div>DATE: {lastCompletedSale.date}</div>
+              </div>
 
-          {lastTraReceipt && taxSettings.mode === 'tra_efd' && (
-            <div className="pt-2 text-center text-[10px] text-[#605E5C] border-t border-[#EDEBE9] space-y-1">
-              <div className="font-mono">VERIFICATION: {lastTraReceipt.verificationCode}</div>
-              {lastTraReceipt.verificationQrDataUrl && (
-                <img
-                  src={lastTraReceipt.verificationQrDataUrl}
-                  alt="TRA QR"
-                  className="mx-auto w-20 h-20"
-                />
+              <div className="border-t border-b border-dashed border-[#C8C6C4] py-2 space-y-1 max-h-40 overflow-y-auto">
+                {lastCompletedSale.items.map((it, idx) => (
+                  <div key={idx} className="flex justify-between gap-2">
+                    <span className="min-w-0">
+                      {it.productName} (x{it.quantity})
+                      {(it.discountPercent ?? 0) > 0 && taxSettings.discountEnabled && (
+                        <span className="text-amber-700"> · -{it.discountPercent}%</span>
+                      )}
+                    </span>
+                    <span className="font-mono shrink-0">{formatTSh(it.total)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-1 font-mono">
+                {taxSettings.discountEnabled &&
+                  taxSettings.showDiscountOnReceipts &&
+                  computeSaleDiscountAmount(lastCompletedSale) > 0 && (
+                    <>
+                      <div className="flex justify-between">
+                        <span>{isSw ? 'JUMLA KABLA YA PUNGUZO:' : 'GROSS SUBTOTAL:'}</span>
+                        <span>{formatTSh(saleGrossSubtotal(lastCompletedSale))}</span>
+                      </div>
+                      <div className="flex justify-between text-amber-700 font-bold">
+                        <span>{isSw ? 'PUNGUZO:' : 'DISCOUNT:'}</span>
+                        <span>- {formatTSh(computeSaleDiscountAmount(lastCompletedSale))}</span>
+                      </div>
+                    </>
+                  )}
+                <div className="flex justify-between">
+                  <span>SUBTOTAL (EXCL VAT):</span>
+                  <span>{formatTSh(lastCompletedSale.subtotal)}</span>
+                </div>
+                {vatActive && taxSettings.showVatOnReceipt && (
+                  <div className="flex justify-between">
+                    <span>{formatVatLabel(taxSettings, isSw).toUpperCase()}:</span>
+                    <span>{formatTSh(lastCompletedSale.vatAmount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-bold text-sm text-[#323130] pt-1 border-t border-[#EDEBE9]">
+                  <span>TOTAL INCL VAT:</span>
+                  <span>{formatTSh(lastCompletedSale.total)}</span>
+                </div>
+                <div className="flex justify-between text-[#107C10] font-bold">
+                  <span>PAID ({lastCompletedSale.payments[0]?.method.toUpperCase()}):</span>
+                  <span>{formatTSh(lastCompletedSale.paidAmount)}</span>
+                </div>
+                {lastCompletedSale.balanceRemaining > 0 && (
+                  <>
+                    <div className="flex justify-between text-[#D13438] font-bold">
+                      <span>POSTED TO CREDIT BALANCE:</span>
+                      <span>{formatTSh(lastCompletedSale.balanceRemaining)}</span>
+                    </div>
+                    {lastCompletedSale.paymentDueDate && (
+                      <div className="flex justify-between text-[#E65100] font-bold">
+                        <span>{isSw ? 'TAREHE YA MALIPO:' : 'PAYMENT DUE:'}</span>
+                        <span>{formatDueDateDisplay(lastCompletedSale.paymentDueDate)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {taxSettings.receiptFooterNote && (
+                <div className="text-center text-[10px] text-[#605E5C]">{taxSettings.receiptFooterNote}</div>
               )}
-              {lastTraReceipt.verificationLink && (
-                <a
-                  href={lastTraReceipt.verificationLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[#0078D4] underline block truncate"
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!lastCompletedSale) return;
+                    const tpl = getActive('invoice');
+                    const data = saleReceiptRenderData(lastCompletedSale, isSw, {
+                      showDiscount: taxSettings.showDiscountOnDocuments && taxSettings.discountEnabled,
+                    });
+                    printDocument(tpl, data, config.branding, isSw);
+                    setLastCompletedSale(null);
+                    setLastTraReceipt(null);
+                  }}
+                  className="flex-1 py-2.5 rounded-lg bg-[#0078D4] hover:bg-[#006cbd] text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                 >
-                  {lastTraReceipt.verificationLink}
-                </a>
-              )}
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>{isSw ? 'Chapisha Risiti' : 'Print Receipt'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLastCompletedSale(null); setLastTraReceipt(null); }}
+                  className="px-4 py-2.5 rounded-lg bg-[#F3F2F1] text-[#323130] font-semibold text-xs cursor-pointer"
+                >
+                  {isSw ? 'Funga' : 'Close'}
+                </button>
+              </div>
             </div>
           )}
-          {!lastTraReceipt && lastCompletedSale.traEfdSignature && taxSettings.mode === 'tra_efd' && (
-            <div className="pt-2 text-center text-[10px] text-[#605E5C] font-mono border-t border-[#EDEBE9]">
-              SIGNATURE: {lastCompletedSale.traEfdSignature}
-            </div>
-          )}
-          {taxSettings.receiptFooterNote && (
-            <div className="text-center text-[10px] text-[#605E5C]">{taxSettings.receiptFooterNote}</div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                if (!lastCompletedSale) return;
-                const tpl = getActive('invoice');
-                const data = saleReceiptRenderData(lastCompletedSale, isSw, {
-                  showDiscount: taxSettings.showDiscountOnDocuments && taxSettings.discountEnabled,
-                });
-                printDocument(tpl, data, config.branding, isSw);
-                setLastCompletedSale(null);
-              }}
-              className="flex-1 py-2 rounded-lg bg-[#0078D4] hover:bg-[#006cbd] text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-xs"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>Print Thermal Receipt</span>
-            </button>
-            <button
-              onClick={() => setLastCompletedSale(null)}
-              className="px-4 py-2 rounded-lg bg-[#F3F2F1] text-[#323130] font-semibold text-xs"
-            >
-              Close
-            </button>
-          </div>
         </div>
-      )}
+        )}
+      </ModalPortal>
 
       {/* POS QR Scanner Modal */}
       <POSQRScannerModal

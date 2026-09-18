@@ -138,7 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* 2. Main Executive Header Bar - Strictly Single Horizontal Line */}
       <header 
         id="duka-header" 
-        className="border-b border-[#E1DFDD] px-3 sm:px-4 py-2 sticky top-0 z-20 shadow-xs flex items-center justify-between gap-2.5 bg-white text-[#323130] flex-nowrap w-full"
+        className="border-b border-[#E1DFDD] px-2.5 sm:px-3 py-1 sticky top-0 z-20 shadow-xs flex items-center justify-between gap-2 bg-white text-[#323130] flex-nowrap w-full min-h-0"
       >
         {/* Left Section: Menu, Home Nav & Search Bar */}
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
@@ -146,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onToggleSidebar}
-              className="lg:hidden flex items-center justify-center w-9 h-9 rounded-xl border border-[#EDEBE9] bg-[#F8F8F8] hover:bg-[#EDEBE9] text-[#323130] cursor-pointer shrink-0"
+              className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg border border-[#EDEBE9] bg-[#F8F8F8] hover:bg-[#EDEBE9] text-[#323130] cursor-pointer shrink-0"
               aria-label={isSw ? 'Fungua menyu' : 'Open menu'}
             >
               <Menu className="w-5 h-5 text-[#6264A7]" />

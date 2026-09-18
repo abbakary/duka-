@@ -1127,7 +1127,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
           {/* PRODUCTS DATA TABLE */}
           <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs overflow-hidden">
-            <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <div>
               <table className="w-full text-left text-[10px] sm:text-xs" style={{ tableLayout: 'fixed' }}>
                 <thead className="bg-[#F8F8F8] border-b border-[#EDEBE9] text-[#605E5C] font-bold uppercase tracking-wider">
                   <tr>

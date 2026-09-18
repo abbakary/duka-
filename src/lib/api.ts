@@ -408,6 +408,18 @@ class ApiClient {
   getPublicPlans() {
     return this.request<Array<Record<string, unknown>>>('/platform/plans');
   }
+  getPublicBillingSettings() {
+    return this.request<Record<string, unknown>>('/platform/billing-settings');
+  }
+  getAdminBillingSettings() {
+    return this.request<Record<string, unknown>>('/admin/billing-settings');
+  }
+  updateAdminBillingSettings(data: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>('/admin/billing-settings', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
   getAdminPlans() {
     return this.request<Array<Record<string, unknown>>>('/admin/plans');
   }

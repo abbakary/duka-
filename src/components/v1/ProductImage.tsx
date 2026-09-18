@@ -5,11 +5,11 @@ import { compressProductImage, readFileAsDataUrl } from '@/lib/imageCompress';
 interface ProductImageThumbProps {
   src?: string | null;
   name?: string;
-  size?: 'sm' | 'md' | 'lg' | 'card';
+  size?: 'sm' | 'md' | 'lg' | 'card' | 'pos';
   className?: string;
 }
 
-const SIZE_PX = { sm: 40, md: 52, lg: 88, card: 112 } as const;
+const SIZE_PX = { sm: 44, md: 52, lg: 88, card: 112, pos: 96 } as const;
 
 /** Displays product photo or a neutral package placeholder. */
 export const ProductImageThumb: React.FC<ProductImageThumbProps> = ({
@@ -20,7 +20,8 @@ export const ProductImageThumb: React.FC<ProductImageThumbProps> = ({
 }) => {
   const px = SIZE_PX[size];
   const [failed, setFailed] = useState(false);
-  const isCard = size === 'card';
+  const isCard = size === 'card' || size === 'pos';
+  const cardHeight = size === 'pos' ? 'h-24 sm:h-28' : 'h-28';
 
   useEffect(() => {
     setFailed(false);
@@ -35,7 +36,7 @@ export const ProductImageThumb: React.FC<ProductImageThumbProps> = ({
         height={isCard ? undefined : px}
         className={
           isCard
-            ? `w-full h-28 object-cover bg-[#F8F8F8] ${className}`
+            ? `w-full ${cardHeight} object-cover bg-[#F8F8F8] ${className}`
             : `rounded-lg object-cover border-2 border-[#E1DFDD] bg-[#F8F8F8] shrink-0 shadow-sm ${className}`
         }
         style={isCard ? undefined : { width: px, height: px }}
@@ -47,13 +48,13 @@ export const ProductImageThumb: React.FC<ProductImageThumbProps> = ({
     <div
       className={
         isCard
-          ? `w-full h-28 flex flex-col items-center justify-center gap-1 text-[#A19F9D] bg-[#F3F2F1] ${className}`
+          ? `w-full ${cardHeight} flex flex-col items-center justify-center gap-1 text-[#A19F9D] bg-[#F3F2F1] ${className}`
           : `rounded-lg border-2 border-dashed border-[#C8C6C4] bg-[#F3F2F1] text-[#8A8886] flex flex-col items-center justify-center shrink-0 ${className}`
       }
       style={isCard ? undefined : { width: px, height: px }}
       title={name}
     >
-      <Package className={size === 'sm' ? 'w-4 h-4' : size === 'lg' || size === 'card' ? 'w-7 h-7' : 'w-5 h-5'} />
+      <Package className={size === 'sm' ? 'w-4 h-4' : size === 'lg' || size === 'card' || size === 'pos' ? 'w-7 h-7' : 'w-5 h-5'} />
     </div>
   );
 };

@@ -16,7 +16,9 @@ import { api } from '@/lib/api';
 import { loginAndLoadUser } from '@/lib/authBridge';
 import { formatApiError } from '@/lib/formatApiError';
 import { useSaasPlans } from '@/context/SaasPlansContext';
+import { usePlatformBilling } from '@/context/PlatformBillingContext';
 import { formatPlanPrice, planBranchLabel, planFeatures, planPeriod } from '@/lib/saasPlans';
+import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { TermsAcceptanceCheckbox } from '@/components/v1/TermsOfServiceView';
 import { termsMustAcceptError } from '@/lib/termsOfService';
@@ -25,6 +27,8 @@ interface PublicRegisterWizardViewProps {
   language: Language;
   initialBusinessType?: BusinessType;
   initialPlan?: SaaSPlanTier;
+  /** true = free trial path; false = paid package selected from landing */
+  initialPreferTrial?: boolean;
   onBack: () => void;
   onLogin: () => void;
   onOpenTerms?: () => void;
@@ -38,6 +42,7 @@ export const PublicRegisterWizardView: React.FC<PublicRegisterWizardViewProps> =
   language,
   initialBusinessType,
   initialPlan,
+  initialPreferTrial = true,
   onBack,
   onLogin,
   onOpenTerms,
@@ -45,6 +50,7 @@ export const PublicRegisterWizardView: React.FC<PublicRegisterWizardViewProps> =
 }) => {
   const isSw = language === 'sw';
   const { plans } = useSaasPlans();
+  const { settings: billing } = usePlatformBilling();
   const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -56,6 +62,7 @@ export const PublicRegisterWizardView: React.FC<PublicRegisterWizardViewProps> =
   const [regPassword, setRegPassword] = useState('');
   const [regPasswordConfirm, setRegPasswordConfirm] = useState('');
   const [businessType, setBusinessType] = useState<BusinessType>(initialBusinessType ?? 'retail');
+  const [billingPath, setBillingPath] = useState<'trial' | 'paid'>(initialPreferTrial ? 'trial' : 'paid');
   const [selectedPlan, setSelectedPlan] = useState<SaaSPlanTier>(initialPlan ?? 'starter');
   const [businessName, setBusinessName] = useState('');
   const [location, setLocation] = useState('Kariakoo, Dar es Salaam');
@@ -76,7 +83,21 @@ export const PublicRegisterWizardView: React.FC<PublicRegisterWizardViewProps> =
     if (initialPlan) setSelectedPlan(initialPlan);
   }, [initialPlan]);
 
+  useEffect(() => {
+    setBillingPath(initialPreferTrial ? 'trial' : 'paid');
+  }, [initialPreferTrial]);
+
   const selectedPlanMeta = plans.find(p => p.tier === selectedPlan) ?? plans[0];
+
+  const chooseTrial = () => {
+    setBillingPath('trial');
+    setSelectedPlan('starter');
+  };
+
+  const choosePaidPlan = (tier: SaaSPlanTier) => {
+    setBillingPath('paid');
+    setSelectedPlan(tier);
+  };
 
   const validateStep = (s: number): boolean => {
     setError('');
@@ -273,20 +294,57 @@ export const PublicRegisterWizardView: React.FC<PublicRegisterWizardViewProps> =
 
           {step === 3 && (
             <div className="space-y-4">
-              <h2 className="font-bold text-lg">{isSw ? 'Chagua kifurushi cha usajili' : 'Choose your subscription plan'}</h2>
+              <h2 className="font-bold text-lg">{isSw ? 'Chagua njia ya kuanza' : 'Choose how to start'}</h2>
               <p className="text-sm text-slate-500">
                 {isSw
-                  ? 'Vipengele ni vile vile kwenye mipango yote — chagua kulingana na matawi unayohitaji (1, 2, au 3).'
-                  : 'All packages include the same features — choose by branches you need (1, 2, or 3).'}
+                  ? `Anza na jaribio bure siku ${billing.trialDays}, au chagua kifurushi cha kulipia sasa. Vipengele ni vile vile — tofauti ni matawi na bei.`
+                  : `Start with a ${billing.trialDays}-day free trial, or pick a paid package now. Same features — only branches and price differ.`}
               </p>
+
+              <button
+                type="button"
+                onClick={chooseTrial}
+                className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                  billingPath === 'trial'
+                    ? 'border-teal-500 bg-teal-50 ring-1 ring-teal-500'
+                    : 'border-slate-200 hover:border-teal-300'
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900">{isSw ? 'Jaribio bure' : 'Free trial'}</span>
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-teal-600 text-white">
+                        {isSw ? 'Inapendekezwa' : 'Recommended'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {isSw
+                        ? `Siku ${billing.trialDays} kamili — hakuna malipo sasa. Baada ya hapo chagua kifurushi.`
+                        : `${billing.trialDays} full days — no payment now. Then choose a package.`}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-teal-700 text-lg">TZS 0</div>
+                    <div className="text-[10px] text-slate-500">/{isSw ? `siku ${billing.trialDays}` : `${billing.trialDays}d`}</div>
+                  </div>
+                </div>
+              </button>
+
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 pt-1">
+                {isSw ? 'Au chagua kifurushi cha kulipia' : 'Or choose a paid package'}
+              </p>
+
               <div className="space-y-3">
                 {plans.filter(plan => Boolean(plan?.id)).map(plan => (
                   <button
                     key={plan.id}
                     type="button"
-                    onClick={() => setSelectedPlan(plan.tier)}
+                    onClick={() => choosePaidPlan(plan.tier)}
                     className={`w-full text-left p-4 rounded-xl border transition-all cursor-pointer ${
-                      selectedPlan === plan.tier ? 'border-teal-500 bg-teal-50 ring-1 ring-teal-500' : 'border-slate-200 hover:border-slate-300'
+                      billingPath === 'paid' && selectedPlan === plan.tier
+                        ? 'border-teal-500 bg-teal-50 ring-1 ring-teal-500'
+                        : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -312,6 +370,17 @@ export const PublicRegisterWizardView: React.FC<PublicRegisterWizardViewProps> =
                   </button>
                 ))}
               </div>
+
+              {billingPath === 'paid' && (
+                <div className="pt-1">
+                  <p className="text-xs text-slate-600 mb-2">
+                    {isSw
+                      ? 'Lipia kupitia Lipa namba, kisha thibitisha WhatsApp kwa uamilishaji.'
+                      : 'Pay via Lipa number, then confirm on WhatsApp for activation.'}
+                  </p>
+                  <SubscriptionPayContactCard settings={billing} isSw={isSw} compact />
+                </div>
+              )}
             </div>
           )}
 
@@ -340,12 +409,29 @@ export const PublicRegisterWizardView: React.FC<PublicRegisterWizardViewProps> =
                 <div><span className="text-slate-500">{isSw ? 'Mahali:' : 'Location:'}</span> {location}</div>
                 {tinNumber && <div><span className="text-slate-500">TIN:</span> {tinNumber}</div>}
                 <div className="pt-2 border-t border-slate-200">
+                  <span className="text-slate-500">{isSw ? 'Njia:' : 'Path:'}</span>{' '}
+                  <strong>
+                    {billingPath === 'trial'
+                      ? (isSw ? `Jaribio bure (${billing.trialDays} siku)` : `Free trial (${billing.trialDays} days)`)
+                      : (isSw ? 'Kifurushi cha kulipia' : 'Paid package')}
+                  </strong>
+                </div>
+                <div>
                   <span className="text-slate-500">{isSw ? 'Kifurushi:' : 'Plan:'}</span>{' '}
-                  <strong>{selectedPlanMeta ? (isSw ? selectedPlanMeta.nameSw : selectedPlanMeta.name) : selectedPlan}</strong>
-                  {!selectedPlanMeta?.contactUs && selectedPlanMeta && (
+                  <strong>
+                    {billingPath === 'trial'
+                      ? (isSw ? 'Starter (baada ya jaribio)' : 'Starter (after trial)')
+                      : (selectedPlanMeta ? (isSw ? selectedPlanMeta.nameSw : selectedPlanMeta.name) : selectedPlan)}
+                  </strong>
+                  {billingPath === 'paid' && !selectedPlanMeta?.contactUs && selectedPlanMeta && (
                     <span className="text-slate-500"> — {formatPlanPrice(selectedPlanMeta, isSw)}{planPeriod(isSw)}</span>
                   )}
                 </div>
+                {billingPath === 'paid' && (
+                  <div className="pt-2">
+                    <SubscriptionPayContactCard settings={billing} isSw={isSw} compact businessName={businessName} />
+                  </div>
+                )}
               </div>
               <div className="flex items-start gap-2 text-xs text-slate-500">
                 <ShieldCheck className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />

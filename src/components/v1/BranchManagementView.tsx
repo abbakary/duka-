@@ -49,6 +49,8 @@ import {
 import { DEFAULT_SAAS_PLANS } from '@/lib/emptyDefaults';
 import { planBranchLabel, formatPlanPrice } from '@/lib/saasPlans';
 import { useSaasPlans } from '@/context/SaasPlansContext';
+import { usePlatformBilling } from '@/context/PlatformBillingContext';
+import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
 import { api } from '@/lib/api';
 import { mapBranch } from '@/lib/apiSync';
 import { saveBranchVatOverride } from '@/lib/taxComplianceSettings';
@@ -93,6 +95,7 @@ export const BranchManagementView: React.FC<BranchManagementViewProps> = ({
   tenantId,
 }) => {
   const isSw = language === 'sw';
+  const { settings: billingSettings } = usePlatformBilling();
   const [activeTab, setActiveTab] = useState<'branches' | 'transfers' | 'analytics' | 'pricing'>('branches');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -1655,8 +1658,15 @@ export const BranchManagementView: React.FC<BranchManagementViewProps> = ({
               })}
             </div>
 
+            <SubscriptionPayContactCard
+              settings={billingSettings}
+              isSw={isSw}
+              businessName={currentUser?.businessName}
+              compact
+            />
+
             <div className="pt-3 border-t border-[#EDEBE9] flex items-center justify-between text-xs text-[#605E5C]">
-              <span>{isSw ? 'Lipa kupitia M-Pesa, Tigo Pesa au Benki' : 'Instant Activation via Mobile Money / Bank'}</span>
+              <span>{isSw ? 'Lipa Lipa namba, kisha thibitisha WhatsApp' : 'Pay Lipa number, then confirm on WhatsApp'}</span>
               <button
                 onClick={() => setIsUpgradeModalOpen(false)}
                 className="px-4 py-2 rounded-lg bg-[#323130] text-white font-bold cursor-pointer"

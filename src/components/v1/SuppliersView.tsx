@@ -1253,7 +1253,6 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
           </div>
 
           <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs overflow-hidden">
-            <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
             <div>
               <table className="w-full text-left text-[10px] sm:text-xs" style={{ tableLayout: 'fixed' }}>
                 <colgroup>

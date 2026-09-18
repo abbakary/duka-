@@ -56,6 +56,8 @@ import { BrandThemePanel } from '@/components/v1/BrandThemePanel';
 import { SettingsSectionNav } from '@/components/v1/SettingsSectionNav';
 import { canManageStaffRBAC } from '@/lib/rbac';
 import { useSaasPlans } from '@/context/SaasPlansContext';
+import { usePlatformBilling } from '@/context/PlatformBillingContext';
+import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
 import { DEFAULT_PUBLIC_PLANS, derivePaymentStatus, formatPlanPrice, paymentStatusLabel, paymentStatusTone, planBranchLabel, planPeriod } from '@/lib/saasPlans';
 import type { SaaSPlanTier } from '@/types/v1';
 import confetti from 'canvas-confetti';
@@ -101,9 +103,10 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
 }) => {
   const isSw = language === 'sw';
   const { plans } = useSaasPlans();
+  const { settings: billingSettings } = usePlatformBilling();
   const catalog = (plans.length ? plans : DEFAULT_PUBLIC_PLANS).filter((p): p is NonNullable<typeof p> => Boolean(p?.id));
   const activePlan = catalog.find(p => p.tier === currentPlanTier) ?? catalog[0] ?? DEFAULT_PUBLIC_PLANS[0];
-  const paymentStatus = derivePaymentStatus(subscriptionExpiry, 'active');
+  const paymentStatus = derivePaymentStatus(subscriptionExpiry, 'active', billingSettings.graceDays);
   const canManageTeam = canManageStaffRBAC(currentUser);
   const [activeTab, setActiveTab] = useState<'profile' | 'branding' | 'team' | 'branches' | 'compliance' | 'documents' | 'billing'>('profile');
 
@@ -943,7 +946,7 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
               </p>
             </div>
             <span className={`text-xs px-3 py-1 rounded-full border font-bold ${paymentStatusTone(paymentStatus)}`}>
-              {paymentStatusLabel(paymentStatus, isSw)}
+              {paymentStatusLabel(paymentStatus, isSw, billingSettings.trialDays)}
             </span>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -958,12 +961,19 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
             <div className="p-4 rounded-xl bg-[#F9F9F7] border border-[#003322]/10">
               <div className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37]">{isSw ? 'Inaisha' : 'Renews / expires'}</div>
               <div className="text-lg font-bold text-[#003322] mt-1">{subscriptionExpiry}</div>
-              <div className="text-xs text-[#605E5C]">{isSw ? 'Mwezi mmoja baada ya malipo' : 'Extended 1 month after payment'}</div>
+              <div className="text-xs text-[#605E5C]">
+                {isSw
+                  ? `Jaribio la siku ${billingSettings.trialDays} bure · kisha lipia kifurushi`
+                  : `${billingSettings.trialDays}-day free trial · then paid package`}
+              </div>
             </div>
-            <div className="p-4 rounded-xl bg-[#F9F9F7] border border-[#003322]/10">
-              <div className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37]">M-Pesa</div>
-              <div className="text-sm font-bold text-[#003322] mt-1">Lipa kwa: 150 000 — DUKAPLUS</div>
-              <div className="text-xs text-[#605E5C]">{isSw ? 'Tuma kumbukumbu ya barua pepe yako' : 'Use your registered email as reference'}</div>
+            <div className="sm:col-span-2 lg:col-span-1">
+              <SubscriptionPayContactCard
+                settings={billingSettings}
+                isSw={isSw}
+                businessName={currentUser?.businessName}
+                compact
+              />
             </div>
           </div>
           <ul className="text-xs text-[#605E5C] space-y-1">
@@ -973,11 +983,11 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
           </ul>
           <div className="border-t border-[#EDEBE9] pt-5 space-y-3">
             <div>
-              <h4 className="text-sm font-bold text-[#323130]">{isSw ? 'Mipango yote' : 'All plans'}</h4>
+              <h4 className="text-sm font-bold text-[#323130]">{isSw ? 'Mipango ya kulipia' : 'Paid packages'}</h4>
               <p className="text-xs text-[#605E5C] mt-0.5">
                 {isSw
-                  ? 'Hakuna mpango wa bure — boresha kupitia M-Pesa au kwenye Usimamizi wa Matawi.'
-                  : 'No free tier — upgrade via M-Pesa or Branch Management.'}
+                  ? `Anza bure siku ${billingSettings.trialDays}. Baada ya hapo, chagua kifurushi na lipia kupitia Lipa namba, kisha wasiliana WhatsApp.`
+                  : `Start free for ${billingSettings.trialDays} days. Then pick a package, pay via Lipa number, and confirm on WhatsApp.`}
               </p>
             </div>
             <div className="grid sm:grid-cols-3 gap-3">

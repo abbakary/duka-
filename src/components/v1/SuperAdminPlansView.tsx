@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Save, RotateCcw, Loader2, Users } from 'lucide-react';
 import { Language } from '@/types/v1';
 import { useSaasPlans } from '@/context/SaasPlansContext';
+import { usePlatformBilling } from '@/context/PlatformBillingContext';
 import { formatPlanPrice, planBranchLabel, planPeriod, PublicPlan } from '@/lib/saasPlans';
 import { SHARED_PLAN_FEATURES, SHARED_PLAN_FEATURES_SW } from '@/lib/planCatalog';
+import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
+import type { PlatformBillingSettings } from '@/lib/billingContact';
 
 interface Props {
   language: Language;
@@ -20,6 +23,10 @@ function textToFeatures(text: string): string[] {
 export const SuperAdminPlansView: React.FC<Props> = ({ language }) => {
   const isSw = language === 'sw';
   const { plans, updatePlan, syncSharedFeatures, resetPlans, refreshPlans, loading } = useSaasPlans();
+  const { settings: billingSettings, updateSettings, refresh: refreshBilling } = usePlatformBilling();
+  const [billingDraft, setBillingDraft] = useState<PlatformBillingSettings>(billingSettings);
+  const [savingBilling, setSavingBilling] = useState(false);
+  const [billingSaved, setBillingSaved] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, PublicPlan>>({});
   const [sharedFeaturesEn, setSharedFeaturesEn] = useState(featuresToText([...SHARED_PLAN_FEATURES]));
   const [sharedFeaturesSw, setSharedFeaturesSw] = useState(featuresToText([...SHARED_PLAN_FEATURES_SW]));
@@ -34,6 +41,10 @@ export const SuperAdminPlansView: React.FC<Props> = ({ language }) => {
   );
 
   useEffect(() => {
+    setBillingDraft(billingSettings);
+  }, [billingSettings]);
+
+  useEffect(() => {
     const next: Record<string, PublicPlan> = {};
     safePlans.forEach(p => { next[p.id] = { ...p }; });
     setDrafts(next);
@@ -42,6 +53,17 @@ export const SuperAdminPlansView: React.FC<Props> = ({ language }) => {
       setSharedFeaturesSw(featuresToText(safePlans[0].featuresSw ?? []));
     }
   }, [safePlans]);
+
+  const saveBilling = useCallback(async () => {
+    setSavingBilling(true);
+    try {
+      await updateSettings(billingDraft);
+      setBillingSaved(true);
+      setTimeout(() => setBillingSaved(false), 2000);
+    } finally {
+      setSavingBilling(false);
+    }
+  }, [billingDraft, updateSettings]);
 
   const patchDraft = (id: string, patch: Partial<PublicPlan>) => {
     setDrafts(prev => {
@@ -119,6 +141,109 @@ export const SuperAdminPlansView: React.FC<Props> = ({ language }) => {
           </button>
         </div>
       </header>
+
+      <div className="bg-white rounded-2xl border border-amber-200 p-5 space-y-4">
+        <div className="flex flex-wrap justify-between gap-3 items-start">
+          <div>
+            <h2 className="text-sm font-bold text-[#003322]">
+              {isSw ? 'Jaribio la bure + Lipa / WhatsApp' : 'Free trial + Lipa / WhatsApp'}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {isSw
+                ? 'Inadhibitiwa hapa — inaonekana kwenye landing, malipo ya wateja, na kizuizi baada ya siku kuisha.'
+                : 'Controlled here — reflects on landing, client billing, and the lock screen after trial ends.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshBilling()}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg border cursor-pointer"
+          >
+            {isSw ? 'Onyesha upya' : 'Refresh'}
+          </button>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+          <label className="space-y-1">
+            <span className="font-bold text-slate-600">{isSw ? 'Siku za jaribio bure' : 'Free trial days'}</span>
+            <input
+              type="number"
+              min={1}
+              max={90}
+              value={billingDraft.trialDays}
+              onChange={e => setBillingDraft(d => ({ ...d, trialDays: Number(e.target.value) || 14 }))}
+              className="w-full px-2 py-1.5 border rounded-lg font-bold"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="font-bold text-slate-600">{isSw ? 'Siku za rehema (baada ya kuisha)' : 'Grace days (after expiry)'}</span>
+            <input
+              type="number"
+              min={0}
+              max={30}
+              value={billingDraft.graceDays}
+              onChange={e => setBillingDraft(d => ({ ...d, graceDays: Number(e.target.value) || 0 }))}
+              className="w-full px-2 py-1.5 border rounded-lg font-bold"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="font-bold text-slate-600">{isSw ? 'Jina la Lipa' : 'Lipa name'}</span>
+            <input
+              type="text"
+              value={billingDraft.lipaName}
+              onChange={e => setBillingDraft(d => ({ ...d, lipaName: e.target.value }))}
+              className="w-full px-2 py-1.5 border rounded-lg font-bold"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="font-bold text-slate-600">{isSw ? 'Namba ya Lipa (M-Pesa)' : 'Lipa number (M-Pesa)'}</span>
+            <input
+              type="text"
+              value={billingDraft.lipaNumber}
+              onChange={e => setBillingDraft(d => ({ ...d, lipaNumber: e.target.value }))}
+              className="w-full px-2 py-1.5 border rounded-lg font-mono font-bold"
+            />
+          </label>
+          <label className="space-y-1 sm:col-span-2">
+            <span className="font-bold text-slate-600">{isSw ? 'Namba ya WhatsApp (msaada)' : 'WhatsApp support number'}</span>
+            <input
+              type="text"
+              value={billingDraft.whatsappNumber}
+              onChange={e => setBillingDraft(d => ({ ...d, whatsappNumber: e.target.value }))}
+              className="w-full px-2 py-1.5 border rounded-lg font-mono font-bold"
+            />
+          </label>
+          <label className="space-y-1 sm:col-span-2 lg:col-span-3">
+            <span className="font-bold text-slate-600">Note EN</span>
+            <textarea
+              rows={2}
+              value={billingDraft.supportNoteEn}
+              onChange={e => setBillingDraft(d => ({ ...d, supportNoteEn: e.target.value }))}
+              className="w-full px-2 py-1.5 border rounded-lg"
+            />
+          </label>
+          <label className="space-y-1 sm:col-span-2 lg:col-span-3">
+            <span className="font-bold text-slate-600">Note SW</span>
+            <textarea
+              rows={2}
+              value={billingDraft.supportNoteSw}
+              onChange={e => setBillingDraft(d => ({ ...d, supportNoteSw: e.target.value }))}
+              className="w-full px-2 py-1.5 border rounded-lg"
+            />
+          </label>
+        </div>
+        <div className="grid md:grid-cols-2 gap-4 items-start">
+          <button
+            type="button"
+            disabled={savingBilling}
+            onClick={() => void saveBilling()}
+            className="px-4 py-2.5 rounded-xl bg-[#003322] text-amber-300 text-xs font-bold cursor-pointer disabled:opacity-60 inline-flex items-center justify-center gap-2"
+          >
+            {savingBilling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {billingSaved ? (isSw ? 'Imehifadhiwa!' : 'Saved!') : (isSw ? 'Hifadhi mipangilio ya malipo' : 'Save billing settings')}
+          </button>
+          <SubscriptionPayContactCard settings={billingDraft} isSw={isSw} compact />
+        </div>
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
         <div>

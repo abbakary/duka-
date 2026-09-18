@@ -165,7 +165,7 @@ export const POSQRScannerModal: React.FC<POSQRScannerModalProps> = ({
   };
 
   return (
-    <ModalPortal open={isOpen} onClose={onClose} zClassName="z-[220]">
+    <ModalPortal open={isOpen} onClose={onClose} zClassName="z-[10050]">
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-[#E1DFDD] overflow-hidden flex flex-col max-h-[min(92dvh,880px)]">
         <div className="px-4 sm:px-6 py-4 bg-[#24284A] text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 min-w-0">
