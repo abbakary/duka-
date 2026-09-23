@@ -161,8 +161,12 @@ class ApiClient {
     const query = Object.keys(qs).length ? '?' + new URLSearchParams(qs).toString() : '';
     return this.request<Record<string, unknown>>(`/dashboard/stats${query}`);
   }
-  getAnalyticsSnapshot(range: 'month' | 'quarter' | 'year' | 'all' = 'month') {
-    return this.request<Record<string, unknown>>(`/analytics/snapshot?range=${range}`);
+  getAnalyticsSnapshot(
+    range: 'month' | 'quarter' | 'year' | 'all' = 'month',
+    branchId?: string | null,
+  ) {
+    const params = new URLSearchParams({ range, ...branchScopeParams(branchId) });
+    return this.request<Record<string, unknown>>(`/analytics/snapshot?${params}`);
   }
   getGeoTerritory(branchId?: string | null) {
     const qs = branchScopeParams(branchId);

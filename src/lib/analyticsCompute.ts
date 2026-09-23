@@ -1,4 +1,5 @@
 import type { Customer, Product, SaleTransaction } from '@/types/v1';
+import { filterSalesForFinancialMetrics, productUnitCost } from '@/lib/financialMetrics';
 
 export interface ProductSalesStats {
   units: number;
@@ -62,12 +63,12 @@ const PAYMENT_LABELS: Record<string, { en: string; sw: string }> = {
 };
 
 export function computeTotalRevenue(sales: SaleTransaction[]): number {
-  return sales.reduce((sum, s) => sum + s.total, 0);
+  return filterSalesForFinancialMetrics(sales).reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 }
 
 export function computeTotalCOGS(sales: SaleTransaction[], products: Product[]): number {
-  const costById = new Map(products.map(p => [p.id, p.cost ?? p.buyingPrice ?? 0]));
-  return sales.reduce((sum, sale) => {
+  const costById = new Map(products.map(p => [p.id, productUnitCost(p)]));
+  return filterSalesForFinancialMetrics(sales).reduce((sum, sale) => {
     return sum + sale.items.reduce((itemSum, item) => {
       const cost = costById.get(item.productId) ?? 0;
       return itemSum + cost * item.quantity;

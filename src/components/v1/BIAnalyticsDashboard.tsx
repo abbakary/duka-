@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ResponsiveContainer, 
   ComposedChart, 
@@ -66,7 +66,12 @@ import {
   computeMonthlyPLTrend,
   buildCostSavingOpportunities,
 } from '@/lib/biCompute';
-import { computeTotalRevenue, computeTotalCOGS } from '@/lib/analyticsCompute';
+import {
+  computeProfitLossSnapshot,
+  mapAnalyticsSnapshotPl,
+  type ProfitLossSnapshot,
+} from '@/lib/financialMetrics';
+import { fetchAnalyticsSnapshot } from '@/lib/apiSync';
 
 interface BIAnalyticsDashboardProps {
   language: Language;
@@ -80,6 +85,7 @@ interface BIAnalyticsDashboardProps {
   onNavigateToExpenses?: () => void;
   onNavigateToGeoMatrix?: () => void;
   activeBranchName?: string | null;
+  branchId?: string | null;
 }
 
 export const BIAnalyticsDashboard: React.FC<BIAnalyticsDashboardProps> = ({
@@ -94,6 +100,7 @@ export const BIAnalyticsDashboard: React.FC<BIAnalyticsDashboardProps> = ({
   onNavigateToExpenses,
   onNavigateToGeoMatrix,
   activeBranchName,
+  branchId,
 }) => {
   const isSw = language === 'sw';
   const t = (key: any) => getTranslation(language, key);
@@ -113,31 +120,44 @@ export const BIAnalyticsDashboard: React.FC<BIAnalyticsDashboardProps> = ({
     [expenses, timeRange],
   );
 
-  const totalSalesRevenue = useMemo(() => computeTotalRevenue(scopedSales), [scopedSales]);
-  const totalCOGS = useMemo(() => computeTotalCOGS(scopedSales, products), [scopedSales, products]);
+  const localPl = useMemo(
+    () => computeProfitLossSnapshot(sales, products, expenses, timeRange),
+    [sales, products, expenses, timeRange],
+  );
+
+  const [serverPl, setServerPl] = useState<ProfitLossSnapshot | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setServerPl(null);
+    void fetchAnalyticsSnapshot(timeRange, branchId).then(raw => {
+      if (cancelled || !raw) return;
+      setServerPl(mapAnalyticsSnapshotPl(raw));
+    });
+    return () => { cancelled = true; };
+  }, [timeRange, branchId, sales.length, expenses.length]);
+
+  const pl = serverPl ?? localPl;
+
+  const totalSalesRevenue = pl.grossSales;
+  const totalCOGS = pl.cogs;
   const momChange = useMemo(() => computeMoMRevenueChange(sales), [sales]);
 
-  const grossProfit = totalSalesRevenue - totalCOGS;
-  const grossMarginPercent = totalSalesRevenue > 0
-    ? Math.round((grossProfit / totalSalesRevenue) * 1000) / 10
-    : 0;
+  const grossProfit = pl.grossProfit;
+  const grossMarginPercent = pl.grossMarginPercent;
 
   const cogsSharePercent = totalSalesRevenue > 0
     ? Math.round((totalCOGS / totalSalesRevenue) * 1000) / 10
     : 0;
 
-  const totalOperatingExpenses = useMemo(() => {
-    return scopedExpenses.reduce((acc, e) => acc + e.amount, 0);
-  }, [scopedExpenses]);
+  const totalOperatingExpenses = pl.totalOpex;
 
   const opexSharePercent = totalSalesRevenue > 0
     ? Math.round((totalOperatingExpenses / totalSalesRevenue) * 1000) / 10
     : 0;
 
-  const netOperatingProfit = grossProfit - totalOperatingExpenses;
-  const netProfitMarginPercent = totalSalesRevenue > 0
-    ? Math.round((netOperatingProfit / totalSalesRevenue) * 1000) / 10
-    : 0;
+  const netOperatingProfit = pl.netProfit;
+  const netProfitMarginPercent = pl.netMarginPercent;
 
   const marginHealthLabel = netProfitMarginPercent >= 20
     ? (isSw ? 'Nzuri' : 'Healthy')

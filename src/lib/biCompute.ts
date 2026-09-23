@@ -1,4 +1,5 @@
 import type { Customer, CustomerBIInsight, ExpenseItem, Product, ProductBIInsight, SaleTransaction, Supplier } from '@/types/v1';
+import { filterExpensesByPeriod, filterSalesByPeriod, type FinancialPeriod } from '@/lib/financialMetrics';
 
 export function computeProductInsights(products: Product[], sales: SaleTransaction[]): ProductBIInsight[] {
   const volumeByProduct = new Map<string, { qty: number; revenue: number }>();
@@ -101,36 +102,14 @@ export function computeCustomerInsights(customers: Customer[], sales: SaleTransa
   });
 }
 
-export type BITimeRange = 'month' | 'quarter' | 'year' | 'all';
+export type BITimeRange = FinancialPeriod;
 
 export function filterSalesByTimeRange(sales: SaleTransaction[], range: BITimeRange): SaleTransaction[] {
-  if (range === 'all') return sales;
-  const now = new Date();
-  const cutoff = new Date(now);
-  cutoff.setHours(0, 0, 0, 0);
-  if (range === 'month') {
-    cutoff.setDate(1);
-  } else if (range === 'quarter') {
-    cutoff.setMonth(Math.floor(now.getMonth() / 3) * 3, 1);
-  } else {
-    cutoff.setMonth(0, 1);
-  }
-  return sales.filter(s => new Date(s.date.replace(' ', 'T')) >= cutoff);
+  return filterSalesByPeriod(sales, range);
 }
 
 export function filterExpensesByTimeRange(expenses: ExpenseItem[], range: BITimeRange): ExpenseItem[] {
-  if (range === 'all') return expenses;
-  const now = new Date();
-  const cutoff = new Date(now);
-  cutoff.setHours(0, 0, 0, 0);
-  if (range === 'month') {
-    cutoff.setDate(1);
-  } else if (range === 'quarter') {
-    cutoff.setMonth(Math.floor(now.getMonth() / 3) * 3, 1);
-  } else {
-    cutoff.setMonth(0, 1);
-  }
-  return expenses.filter(e => new Date(e.date) >= cutoff);
+  return filterExpensesByPeriod(expenses, range);
 }
 
 export function computeMoMRevenueChange(sales: SaleTransaction[]): {

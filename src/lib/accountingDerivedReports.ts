@@ -1,16 +1,11 @@
 import type { Customer, ExpenseItem, Product, PurchaseOrder, SaleTransaction } from '@/types/v1';
 import { computeTotalCOGS, computeTotalRevenue } from '@/lib/analyticsCompute';
+import { filterSalesForFinancialMetrics } from '@/lib/financialMetrics';
 
 export type AccountingBooksMode = 'standard' | 'tra';
 
-const COMPLETED = new Set([
-  'completed',
-  'pending_credit',
-  'ready_to_complete',
-]);
-
 export function filterCompletedSales(sales: SaleTransaction[]): SaleTransaction[] {
-  return sales.filter(s => COMPLETED.has(s.status));
+  return filterSalesForFinancialMetrics(sales);
 }
 
 export function sumVatCollected(sales: SaleTransaction[]): number {

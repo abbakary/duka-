@@ -689,11 +689,17 @@ export interface DashboardStats {
   outstandingReceivables: number;
   outstandingPayables: number;
   monthlyRevenue: number;
+  grossSales: number;
+  cogs: number;
+  grossMargin: number;
+  totalOpex: number;
+  netProfit: number;
   topProducts: Array<{ name: string; quantity: number; revenue: number }>;
 }
 
 export function mapDashboardStats(raw: Record<string, unknown>): DashboardStats {
   const top = (raw.top_products as Array<Record<string, unknown>>) ?? [];
+  const monthlyRevenue = Number(raw.monthly_revenue ?? 0);
   return {
     todayRevenue: Number(raw.today_revenue ?? 0),
     todaySalesCount: Number(raw.today_sales_count ?? 0),
@@ -703,13 +709,29 @@ export function mapDashboardStats(raw: Record<string, unknown>): DashboardStats 
     totalCustomers: Number(raw.total_customers ?? 0),
     outstandingReceivables: Number(raw.outstanding_receivables ?? 0),
     outstandingPayables: Number(raw.outstanding_payables ?? 0),
-    monthlyRevenue: Number(raw.monthly_revenue ?? 0),
+    monthlyRevenue,
+    grossSales: Number(raw.gross_sales ?? monthlyRevenue),
+    cogs: Number(raw.cogs ?? 0),
+    grossMargin: Number(raw.gross_margin ?? 0),
+    totalOpex: Number(raw.total_opex ?? 0),
+    netProfit: Number(raw.net_profit ?? 0),
     topProducts: top.map(p => ({
       name: String(p.name ?? p.product_name ?? ''),
       quantity: Number(p.quantity ?? 0),
       revenue: Number(p.revenue ?? p.total ?? 0),
     })),
   };
+}
+
+export async function fetchAnalyticsSnapshot(
+  range: 'month' | 'quarter' | 'year' | 'all' = 'month',
+  branchId?: string | null,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return await api.getAnalyticsSnapshot(range, branchId);
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchDashboardStats(branchId?: string | null): Promise<DashboardStats | null> {

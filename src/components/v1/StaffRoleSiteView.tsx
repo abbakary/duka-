@@ -68,6 +68,7 @@ import {
 } from '@/types/v1';
 import { formatTSh } from '@/utils/translations';
 import { computeTotalRevenue, computeTotalCOGS, computeTodaySalesStats } from '@/lib/analyticsCompute';
+import { filterSalesByPeriod, computeProfitLossSnapshot } from '@/lib/financialMetrics';
 import { resolveDefaultBranchId } from '@/lib/apiSync';
 import { TodaySalesHeroKpi } from '@/components/v1/TodaySalesHeroKpi';
 import confetti from 'canvas-confetti';
@@ -233,15 +234,11 @@ export const StaffRoleSiteView: React.FC<StaffRoleSiteViewProps> = ({
     () => customers.filter(c => c.balance > 0).length,
     [customers],
   );
-  const monthlyRevenue = useMemo(() => {
-    const now = new Date();
-    return sales
-      .filter(s => {
-        const d = new Date(s.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      })
-      .reduce((acc, s) => acc + s.total, 0);
-  }, [sales]);
+  const monthlyPl = useMemo(
+    () => computeProfitLossSnapshot(sales, products, [], 'month'),
+    [sales, products],
+  );
+  const monthlyRevenue = monthlyPl.grossSales;
   const monthlyVAT = useMemo(() => {
     const now = new Date();
     return sales
@@ -254,20 +251,9 @@ export const StaffRoleSiteView: React.FC<StaffRoleSiteViewProps> = ({
   const allTimeRevenue = useMemo(() => computeTotalRevenue(sales), [sales]);
   const businessDisplayName = currentUser?.businessName || (isSw ? 'Biashara Yako' : 'Your Business');
 
-  const monthStart = useMemo(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
-  }, []);
+  const monthSales = useMemo(() => filterSalesByPeriod(sales, 'month'), [sales]);
 
-  const monthSales = useMemo(
-    () => sales.filter(s => new Date(s.date) >= monthStart),
-    [sales, monthStart],
-  );
-
-  const monthlyCOGS = useMemo(
-    () => computeTotalCOGS(monthSales, products),
-    [monthSales, products],
-  );
+  const monthlyCOGS = monthlyPl.cogs;
 
   const inventoryValuation = useMemo(
     () => products.reduce((sum, p) => sum + p.stock * (p.cost ?? 0), 0),

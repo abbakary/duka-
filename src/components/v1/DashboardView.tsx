@@ -71,8 +71,6 @@ import { useTaxCompliance } from '@/context/TaxComplianceContext';
 import { getComplianceStatusLabel } from '@/lib/taxComplianceSettings';
 import { getBusinessProfile } from '@/lib/businessEngine';
 import {
-  computeTotalRevenue,
-  computeTotalCOGS,
   computeSalesPerformance7d,
   computeSalesPerformance30d,
   computeSalesPerformanceQuarter,
@@ -98,6 +96,8 @@ import {
 } from '@/lib/cashierShiftStore';
 import { TodaySalesHeroKpi } from '@/components/v1/TodaySalesHeroKpi';
 import { PageSectionHeader } from '@/components/v1/PageSectionHeader';
+import { computeProfitLossSnapshot } from '@/lib/financialMetrics';
+import type { DashboardStats } from '@/lib/apiSync';
 
 interface DashboardViewProps {
   language: Language;
@@ -112,6 +112,7 @@ interface DashboardViewProps {
   onOpenAIChat: () => void;
   onOpenAIChatWithPrompt?: (prompt: string) => void;
   onSelectCustomer: (cust: Customer) => void;
+  dashboardStats?: DashboardStats | null;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -127,6 +128,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenAIChat,
   onOpenAIChatWithPrompt,
   onSelectCustomer,
+  dashboardStats,
 }) => {
   const isSw = language === 'sw';
   const t = (key: any) => getTranslation(language, key);
@@ -211,14 +213,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [productInsightTab, setProductInsightTab] = useState<'best' | 'slow' | 'territories' | 'crosssell'>('best');
   const [quickPromoSent, setQuickPromoSent] = useState<string | null>(null);
 
-  // Aggregations from live sales data
-  const totalSalesRevenue = useMemo(() => computeTotalRevenue(sales), [sales]);
-  const totalCost = useMemo(() => computeTotalCOGS(sales, products), [sales, products]);
-  const totalOperatingExpenses = useMemo(
-    () => expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0),
-    [expenses],
+  const monthPl = useMemo(
+    () => computeProfitLossSnapshot(sales, products, expenses, 'month'),
+    [sales, products, expenses],
   );
-  const netProfit = totalSalesRevenue - totalCost - totalOperatingExpenses;
+  const totalSalesRevenue = dashboardStats?.grossSales ?? monthPl.grossSales;
+  const totalCost = dashboardStats?.cogs ?? monthPl.cogs;
+  const totalOperatingExpenses = dashboardStats?.totalOpex ?? monthPl.totalOpex;
+  const netProfit = dashboardStats?.netProfit ?? monthPl.netProfit;
   const netMarginPercent = totalSalesRevenue > 0
     ? Math.round((netProfit / totalSalesRevenue) * 1000) / 10
     : 0;

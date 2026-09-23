@@ -1831,6 +1831,7 @@ export default function DukaPortal() {
                     products={branchScopedProducts}
                     sales={branchScopedSales}
                     expenses={branchScopedExpenses}
+                    dashboardStats={dashboardStats}
                     currentUser={currentUser}
                     userRole={userRole}
                     onNavigate={setActiveTab}
@@ -1897,6 +1898,7 @@ export default function DukaPortal() {
                     expenses={branchScopedExpenses}
                     staffList={branchScopedStaff}
                     suppliers={suppliers}
+                    branchId={resolveApiBranchId()}
                     activeBranchName={activeBranchRecord?.name || currentUser?.branchName || currentUser?.branch}
                     onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
                     onNavigateToExpenses={() => setActiveTab('expenses-payroll')}
