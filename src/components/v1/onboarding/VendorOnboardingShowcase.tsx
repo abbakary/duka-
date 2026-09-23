@@ -82,7 +82,7 @@ export const VendorOnboardingShowcase: React.FC<Props> = ({
                   ? 'Jinsi ya kutumia mfumo wako'
                   : 'How to use your shop system'}
             </h2>
-            <p className="text-xs text-[#5a7a68] mt-1 max-w-xl">
+            <p className="text-sm text-slate-700 mt-1 max-w-xl leading-relaxed">
               {selected
                 ? cardBody(selected, language)
                 : isSw
@@ -171,10 +171,10 @@ export const VendorOnboardingShowcase: React.FC<Props> = ({
                       style={{ background: `linear-gradient(135deg, ${card.accent}, transparent)` }}
                     />
                   </div>
-                  <div className="p-3 space-y-2">
+                  <div className="p-3 space-y-2 bg-slate-50/80 border-t border-slate-100">
                     <p className="text-sm font-bold text-[#1a3d2e]">{cardTitle(card, language)}</p>
-                    <p className="text-[11px] text-[#5a7a68] leading-snug line-clamp-2">{cardBody(card, language)}</p>
-                    <p className="text-[10px] text-[#5a7a68]">
+                    <p className="text-xs text-slate-700 leading-relaxed line-clamp-3">{cardBody(card, language)}</p>
+                    <p className="text-xs text-slate-600 font-medium">
                       {isSw
                         ? `${card.stepsSw.length} hatua — bonyeza kusoma`
                         : `${card.stepsEn.length} steps — tap to read`}
@@ -195,7 +195,7 @@ export const VendorOnboardingShowcase: React.FC<Props> = ({
 
         {!selected && (
           <footer className="px-5 py-3 border-t border-[#e7f5ec] flex flex-wrap gap-2 justify-between shrink-0 bg-white/80">
-            <p className="text-[10px] text-[#5a7a68] self-center max-w-md">
+            <p className="text-xs text-slate-600 self-center max-w-md leading-relaxed">
               {isSw
                 ? 'Usifungue moduli moja kwa moja — soma hatua kwanza ili kuepuka changamoto.'
                 : 'Do not jump into modules blindly — read the steps on each card first.'}

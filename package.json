@@ -10,7 +10,11 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:web": "npm run build",
+    "sync:mobile": "node ../scripts/sync-web-to-mobile.mjs",
+    "apk:release": "npm run verify:web && npm run sync:mobile && cd ../mobileapp && flutter pub get && flutter build apk --release --target-platform android-arm64",
+    "apk:release-all-abi": "npm run verify:web && npm run sync:mobile && cd ../mobileapp && flutter pub get && flutter build apk --split-per-abi --release"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.8",

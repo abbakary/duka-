@@ -6,7 +6,6 @@ import { loginAndLoadUser } from '@/lib/authBridge';
 import { DEMO_ACCOUNTS, DEMO_PASSWORD } from '@/lib/apiConfig';
 import { formatApiError } from '@/lib/formatApiError';
 import { BrandLogo } from '@/components/ui/BrandLogo';
-import { PwaInstallPrompt } from '@/components/ui/PwaInstallPrompt';
 
 interface PublicLoginViewProps {
   language: Language;
@@ -54,8 +53,7 @@ export const PublicLoginView: React.FC<PublicLoginViewProps> = ({
       </header>
 
       <div className="flex-1 flex flex-col items-center justify-center px-4 pb-16">
-        <BrandLogo height={48} className="mb-4" />
-        <PwaInstallPrompt language={language} />
+        <BrandLogo height={48} className="mb-6" />
 
         <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
           <h1 className="text-2xl font-serif font-bold text-slate-900">{isSw ? 'Karibu tena' : 'Welcome back'}</h1>
