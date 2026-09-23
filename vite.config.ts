@@ -6,6 +6,7 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // Dev proxy target — default Railway; override with VITE_BACKEND_URL in .env.development
   const backendTarget =
     env.VITE_BACKEND_URL ||
     'https://dukaplusbackend-production.up.railway.app'

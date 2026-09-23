@@ -8,11 +8,25 @@ import {
   Clock,
   CheckCircle2,
   AlertTriangle,
-  TrendingUp,
   LogIn,
   ArrowRight,
   Plus,
+  LayoutDashboard,
+  UserPlus,
+  CalendarOff,
+  Star,
+  BarChart3,
 } from 'lucide-react';
+import { HrOdooDashboard } from '@/components/v1/hr/HrOdooDashboard';
+import { PayrollTanzaniaHub } from '@/components/v1/payroll/PayrollTanzaniaHub';
+import { HrRecruitmentKanban } from '@/components/v1/hr/HrRecruitmentKanban';
+import { HrTimeOffPanel } from '@/components/v1/hr/HrTimeOffPanel';
+import { HrAppraisalsPanel } from '@/components/v1/hr/HrAppraisalsPanel';
+import { HrReportingPanel } from '@/components/v1/hr/HrReportingPanel';
+import { HrEmployeeDirectoryCards } from '@/components/v1/hr/HrEmployeeDirectoryCards';
+import { loadHrStore, saveHrStore, type HrStoreSnapshot } from '@/lib/hrStore';
+import { api } from '@/lib/api';
+import type { HrDepartmentId } from '@/lib/hrDerivedMetrics';
 import { StaffTeamPanel } from '@/components/v1/StaffTeamPanel';
 import { ToastPortal } from '@/components/ui/ModalPortal';
 import { computeCashierLeaderboard } from '@/lib/analyticsCompute';
@@ -25,7 +39,15 @@ import {
   todayDateStr,
   type StaffPayrollConfig,
 } from '@/lib/payrollStore';
-import { canManagePayroll, canManageStaffRBAC, canSwitchStaffWorkstation } from '@/lib/rbac';
+import { fetchPayrollContractsMerged, pushPayrollContractToApi } from '@/lib/payrollApiSync';
+import {
+  canManageHrPeople,
+  canManagePayroll,
+  canManageStaffRBAC,
+  canPostPayrollAccounting,
+  canSwitchStaffWorkstation,
+  getDashboardPersona,
+} from '@/lib/rbac';
 import { formatTSh } from '@/utils/translations';
 import type {
   AuthUser,
@@ -34,7 +56,16 @@ import type {
   StaffMember,
 } from '@/types/v1';
 
-type PeopleTab = 'overview' | 'directory' | 'compensation' | 'attendance';
+type PeopleTab =
+  | 'dashboard'
+  | 'directory'
+  | 'recruitment'
+  | 'timeoff'
+  | 'appraisals'
+  | 'reporting'
+  | 'compensation'
+  | 'attendance'
+  | 'payroll';
 
 interface StaffUsersViewProps {
   language: Language;
@@ -43,8 +74,12 @@ interface StaffUsersViewProps {
   currentUser?: AuthUser | null;
   sales?: SaleTransaction[];
   tenantStorageId?: string;
+  activeBranchId?: string | null;
+  activeBranchName?: string | null;
   onNavigate?: (tab: string) => void;
+  onNavigateToAccounting?: () => void;
   onSwitchToStaffSite?: (staff: StaffMember) => void;
+  initialSection?: PeopleTab;
 }
 
 export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
@@ -54,34 +89,98 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
   currentUser,
   sales = [],
   tenantStorageId,
+  activeBranchId,
+  activeBranchName,
   onNavigate,
+  onNavigateToAccounting,
   onSwitchToStaffSite,
+  initialSection,
 }) => {
   const isSw = language === 'sw';
-  const canTeam = canManageStaffRBAC(currentUser);
-  const canPay = canManagePayroll(currentUser);
+  const canTeam = canManageHrPeople(currentUser);
+  const canPay = canManagePayroll(currentUser) || canPostPayrollAccounting(currentUser);
+  const persona = getDashboardPersona(currentUser);
   const canSwitch = canSwitchStaffWorkstation(currentUser) && Boolean(onSwitchToStaffSite);
   const tenantId = tenantStorageId || currentUser?.businessId || currentUser?.id || 'local';
   const today = todayDateStr();
   const month = currentMonthStr();
 
-  const [tab, setTab] = useState<PeopleTab>(() => (canManageStaffRBAC(currentUser) ? 'directory' : 'overview'));
+  const [tab, setTab] = useState<PeopleTab>(() => initialSection ?? (canManageStaffRBAC(currentUser) ? 'dashboard' : 'dashboard'));
+
+  useEffect(() => {
+    if (initialSection) setTab(initialSection);
+  }, [initialSection]);
+  const [hrStore, setHrStore] = useState(() => loadHrStore(tenantId, activeBranchId));
+  const [directoryDeptFilter, setDirectoryDeptFilter] = useState<HrDepartmentId | undefined>(undefined);
   const [staffConfig, setStaffConfig] = useState<Record<string, StaffPayrollConfig>>({});
-  const [payrollRecords, setPayrollRecords] = useState(() => loadPayrollStore(tenantId).payrollRecords);
-  const [advances, setAdvances] = useState(() => loadPayrollStore(tenantId).advances);
-  const [allowances, setAllowances] = useState(() => loadPayrollStore(tenantId).dailyAllowances);
+  const [payrollRecords, setPayrollRecords] = useState(() => loadPayrollStore(tenantId, activeBranchId).payrollRecords);
+  const [advances, setAdvances] = useState(() => loadPayrollStore(tenantId, activeBranchId).advances);
+  const [allowances, setAllowances] = useState(() => loadPayrollStore(tenantId, activeBranchId).dailyAllowances);
   const [editRatesId, setEditRatesId] = useState<string | null>(null);
   const [rateDraft, setRateDraft] = useState({ baseSalary: 0, food: 0, transport: 0 });
   const [toast, setToast] = useState<string | null>(null);
   const [addOpenSignal, setAddOpenSignal] = useState(0);
+  const [openStaffDetailId, setOpenStaffDetailId] = useState<string | null>(null);
 
   useEffect(() => {
-    const store = loadPayrollStore(tenantId);
-    setStaffConfig(store.staffConfig);
+    const store = loadPayrollStore(tenantId, activeBranchId);
     setPayrollRecords(store.payrollRecords);
     setAdvances(store.advances);
     setAllowances(store.dailyAllowances);
-  }, [tenantId, staffList.length]);
+    let cancelled = false;
+    void fetchPayrollContractsMerged(store.staffConfig).then(merged => {
+      if (cancelled) return;
+      setStaffConfig(merged);
+      savePayrollStore(tenantId, { ...store, staffConfig: merged }, activeBranchId);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, activeBranchId, staffList.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const local = loadHrStore(tenantId, activeBranchId);
+    setHrStore(local);
+    if (!api.hasValidSession()) return;
+    void api
+      .getHrWorkspace(activeBranchId)
+      .then(remote => {
+        if (cancelled) return;
+        const hasRemote =
+          (remote.applicants?.length ?? 0) > 0 ||
+          (remote.timeOff?.length ?? 0) > 0 ||
+          (remote.appraisals?.length ?? 0) > 0;
+        if (hasRemote) {
+          const next: HrStoreSnapshot = {
+            applicants: remote.applicants as HrStoreSnapshot['applicants'],
+            timeOff: remote.timeOff as HrStoreSnapshot['timeOff'],
+            appraisals: remote.appraisals as HrStoreSnapshot['appraisals'],
+          };
+          setHrStore(next);
+          saveHrStore(tenantId, next, activeBranchId);
+        } else if (local.applicants.length > 0) {
+          void api.saveHrWorkspace(local, activeBranchId);
+        }
+      })
+      .catch(() => {
+        /* offline — keep local */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, activeBranchId]);
+
+  const persistHr = (patch: Partial<HrStoreSnapshot>) => {
+    setHrStore(prev => {
+      const next = { ...prev, ...patch };
+      saveHrStore(tenantId, next, activeBranchId);
+      if (api.hasValidSession()) {
+        void api.saveHrWorkspace(next, activeBranchId).catch(() => undefined);
+      }
+      return next;
+    });
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -131,8 +230,12 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
 
   const persistConfig = (next: Record<string, StaffPayrollConfig>) => {
     setStaffConfig(next);
-    const store = loadPayrollStore(tenantId);
-    savePayrollStore(tenantId, { ...store, staffConfig: next });
+    const store = loadPayrollStore(tenantId, activeBranchId);
+    savePayrollStore(tenantId, { ...store, staffConfig: next }, activeBranchId);
+    for (const s of staffList) {
+      const cfg = next[s.id];
+      if (cfg) void pushPayrollContractToApi(s.id, s.name, cfg).catch(() => undefined);
+    }
   };
 
   const openRateEditor = (staff: (typeof staffWithStats)[number]) => {
@@ -181,18 +284,20 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
         </h2>
         <p className="text-sm text-[#605E5C]">
           {isSw
-            ? 'Moduli ya Watu inapatikana kwa mmiliki na wasimamizi pekee.'
-            : 'The People module is available to owners and managers only.'}
+            ? 'Moduli ya Watu inapatikana kwa mmiliki, HR na wasimamizi.'
+            : 'The People module is available to owners, HR, and managers.'}
         </p>
       </div>
     );
   }
 
-  const tabs: Array<{ id: PeopleTab; label: string; icon: typeof Users }> = [
-    { id: 'overview', label: isSw ? 'Muhtasari' : 'Overview', icon: TrendingUp },
-    { id: 'directory', label: isSw ? 'Orodha' : 'Directory', icon: UserCog },
-    { id: 'compensation', label: isSw ? 'Malipo' : 'Compensation', icon: Banknote },
-    { id: 'attendance', label: isSw ? 'Mahudhurio' : 'Attendance', icon: Clock },
+  const topNav: Array<{ id: PeopleTab; label: string }> = [
+    { id: 'dashboard', label: isSw ? 'Dashibodi' : 'Dashboard' },
+    { id: 'directory', label: isSw ? 'Wafanyakazi' : 'Employees' },
+    { id: 'recruitment', label: isSw ? 'Kuajiri' : 'Recruitment' },
+    { id: 'payroll', label: isSw ? 'Mishahara' : 'Payroll' },
+    { id: 'timeoff', label: isSw ? 'Likizo' : 'Time off' },
+    { id: 'reporting', label: isSw ? 'Ripoti' : 'Reporting' },
   ];
 
   return (
@@ -217,9 +322,15 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
                 {isSw ? 'Watu & HR' : 'People & HR'}
               </h1>
               <p className="text-sm text-[#605E5C]">
+                {activeBranchName ? (
+                  <>
+                    <span className="font-semibold text-[#0F2347]">{activeBranchName}</span>
+                    {' · '}
+                  </>
+                ) : null}
                 {isSw
-                  ? 'Simamia wafanyakazi, zamu, posho, na mishahara mahali pamoja.'
-                  : 'Manage employees, shifts, stipends, and payroll in one place.'}
+                  ? 'Wafanyakazi na HR wa tawi hili tu.'
+                  : 'Staff and HR for this branch only.'}
               </p>
             </div>
           </div>
@@ -242,12 +353,22 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => onNavigate('payroll')}
+                onClick={() => setTab('payroll')}
                 className="px-3 py-2 rounded-xl border border-[#E1DFDD] bg-white text-xs font-bold text-[#323130] hover:bg-[#F3F2F1] flex items-center gap-1.5 cursor-pointer"
               >
                 <Banknote className="w-3.5 h-3.5 text-emerald-600" />
-                {isSw ? 'Mishahara' : 'Run payroll'}
+                {isSw ? 'Mishahara' : 'Payroll workspace'}
               </button>
+              {onNavigateToAccounting && (
+                <button
+                  type="button"
+                  onClick={onNavigateToAccounting}
+                  className="px-3 py-2 rounded-xl border border-[#714b67]/30 bg-[#f1e9ef] text-xs font-bold text-[#714b67] hover:bg-[#e8dce6] flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowRight className="w-3.5 h-3.5" />
+                  {isSw ? 'Uhasibu' : 'Accounting'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onNavigate('allowances')}
@@ -268,6 +389,35 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
           )}
         </div>
       </header>
+
+      {(persona === 'hr' || persona === 'accountant') && (
+        <div
+          className={`rounded-xl border p-4 text-sm ${
+            persona === 'accountant'
+              ? 'border-[#038387]/35 bg-gradient-to-r from-[#e6f3f4] to-white'
+              : 'border-[#C239B3]/30 bg-gradient-to-r from-[#fdf2fb] to-white'
+          }`}
+        >
+          <p className="font-bold text-[#323130]">
+            {persona === 'accountant'
+              ? isSw
+                ? 'Mtazamo wa Mhasibu'
+                : 'Accountant workspace'
+              : isSw
+                ? 'Mtazamo wa HR'
+                : 'HR workspace'}
+          </p>
+          <p className="text-[#605E5C] mt-1 text-xs leading-relaxed">
+            {persona === 'accountant'
+              ? isSw
+                ? 'Thibitisha mizunguko, pakua PAYE/NSSF, na chapisha mishahara kwenye uhasibu. Usibadilishe wasifu wa wafanyakazi bila HR.'
+                : 'Confirm payroll runs, export PAYE/NSSF schedules, and post journals to accounting. Employee profile edits stay with HR/owner.'
+              : isSw
+                ? 'Sajili wafanyakazi, picha, TIN/NSSF, mkataba, slip za mshahara na saini ya kidijitali kabla ya kuchapisha.'
+                : 'Register staff, photos, TIN/NSSF, contracts, statutory payslips, and capture your digital signature before printing.'}
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border border-[#E1DFDD] p-4">
@@ -293,189 +443,215 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5 bg-[#F3F2F1] p-1 rounded-xl w-fit">
-        {tabs.map(t => {
-          const Icon = t.icon;
-          const active = tab === t.id;
-          return (
+      {tab !== 'payroll' && (
+        <nav className="flex overflow-x-auto whitespace-nowrap gap-5 items-center rounded-lg bg-[#714b67] px-4 h-11 text-white text-sm sticky top-0 z-[5]">
+          <span className="font-medium shrink-0">{isSw ? 'Watu' : 'People'}</span>
+          {topNav.map(t => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
-                active ? 'bg-white text-[#323130] shadow-sm' : 'text-[#605E5C] hover:text-[#323130]'
+              className={`shrink-0 border-0 bg-transparent py-3 cursor-pointer ${
+                tab === t.id ? 'opacity-100 shadow-[inset_0_-2px_0_#fff]' : 'opacity-85 hover:opacity-100'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
               {t.label}
             </button>
-          );
-        })}
-      </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setTab('compensation')}
+            className={`shrink-0 border-0 bg-transparent py-3 cursor-pointer ml-auto text-xs ${
+              tab === 'compensation' ? 'opacity-100 underline' : 'opacity-75'
+            }`}
+          >
+            {isSw ? 'Posho & viwango' : 'Stipends & rates'}
+          </button>
+        </nav>
+      )}
 
-      {tab === 'overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          <div className="lg:col-span-3 space-y-4">
-            <div className="bg-white rounded-xl border border-[#E1DFDD] overflow-hidden">
-              <div className="px-4 py-3 border-b border-[#EDEBE9] flex items-center justify-between">
-                <h3 className="text-sm font-bold text-[#323130]">
-                  {isSw ? 'Utendaji wa leo (keshia)' : "Today's cashier performance"}
+      {tab === 'payroll' && canPay && (
+        <PayrollTanzaniaHub
+          language={language}
+          staffList={staffList}
+          staffConfig={staffConfig}
+          onStaffConfigChange={next => persistConfig(next)}
+          businessName={currentUser?.businessName || undefined}
+          branchName={activeBranchName || undefined}
+          branchId={activeBranchId}
+          tenantId={tenantId}
+          currentUser={currentUser}
+          onNavigateToAccounting={onNavigateToAccounting}
+          onOpenStaffRecord={id => {
+            if (id === 'new') {
+              setTab('directory');
+              setAddOpenSignal(n => n + 1);
+              return;
+            }
+            setOpenStaffDetailId(id);
+            setTab('directory');
+          }}
+          onShowToast={showToast}
+        />
+      )}
+
+      {tab === 'payroll' && !canPay && (
+        <p className="text-sm text-[#605E5C] p-4 bg-white rounded-xl border">
+          {isSw ? 'Huna ruhusa ya mishahara.' : 'You do not have payroll permissions.'}
+        </p>
+      )}
+
+      {tab === 'dashboard' && (
+        <div className="space-y-4">
+          <HrOdooDashboard
+            language={language}
+            staffList={staffList}
+            timeOff={hrStore.timeOff}
+            applicants={hrStore.applicants}
+            appraisals={hrStore.appraisals}
+            onOpenEmployees={dept => {
+              setDirectoryDeptFilter(dept);
+              setTab('directory');
+            }}
+            onOpenRecruitment={() => setTab('recruitment')}
+            onOpenTimeOff={() => setTab('timeoff')}
+            onOpenAppraisals={() => setTab('appraisals')}
+            onOpenReporting={() => setTab('reporting')}
+          />
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 bg-white rounded-xl border border-[#d4e8dc] overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#e7f5ec] flex items-center justify-between bg-[#f5faf7]">
+                <h3 className="text-sm font-bold text-[#1a3d2e]">
+                  {isSw ? 'Utendaji wa leo (POS)' : "Today's POS performance"}
                 </h3>
                 {topCashier && (
-                  <span className="text-[11px] font-bold text-[#0078D4]">
+                  <span className="text-[11px] font-bold text-[#107C10]">
                     🏆 {topCashier.cashierName} · {formatTSh(topCashier.revenue)}
                   </span>
                 )}
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-64">
                 <table className="w-full text-xs">
-                  <thead className="bg-[#F8F8F8] text-[#605E5C] uppercase text-[10px] font-bold">
+                  <thead className="bg-[#e7f5ec] text-[#3d5c4a] uppercase text-[10px] font-bold">
                     <tr>
-                      <th className="py-2.5 px-4 text-left">{isSw ? 'Mfanyakazi' : 'Employee'}</th>
-                      <th className="py-2.5 px-3 text-left">{isSw ? 'Nafasi' : 'Role'}</th>
-                      <th className="py-2.5 px-3 text-right">{isSw ? 'Risiti' : 'Receipts'}</th>
-                      <th className="py-2.5 px-3 text-right">{isSw ? 'Mapato' : 'Revenue'}</th>
-                      <th className="py-2.5 px-4 text-left">{isSw ? 'Hali' : 'Status'}</th>
-                      {canSwitch && <th className="py-2.5 px-3 text-right" />}
+                      <th className="py-2 px-4 text-left">{isSw ? 'Mfanyakazi' : 'Employee'}</th>
+                      <th className="py-2 px-3 text-right">{isSw ? 'Mapato' : 'Revenue'}</th>
+                      <th className="py-2 px-3 text-left">{isSw ? 'Hali' : 'Status'}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#EDEBE9]">
+                  <tbody className="divide-y divide-[#eef5f0]">
                     {staffWithStats
                       .slice()
                       .sort((a, b) => b.todayRevenueTzs - a.todayRevenueTzs)
+                      .slice(0, 8)
                       .map(s => (
-                        <tr key={s.id} className="hover:bg-[#FAFBFC]">
-                          <td className="py-3 px-4">
-                            <div className="font-semibold text-[#323130]">{s.name}</div>
-                            <div className="text-[10px] text-[#605E5C]">{s.branch || 'HQ'}</div>
+                        <tr key={s.id}>
+                          <td className="py-2 px-4 font-semibold">{s.name}</td>
+                          <td className="py-2 px-3 text-right font-mono text-emerald-700">{formatTSh(s.todayRevenueTzs)}</td>
+                          <td className="py-2 px-3">
+                            {s.shiftOpen ? (isSw ? 'Zamu' : 'On shift') : '—'}
                           </td>
-                          <td className="py-3 px-3">
-                            <span className="px-2 py-0.5 rounded-md bg-[#F3F2F1] text-[10px] font-bold">{s.role}</span>
-                          </td>
-                          <td className="py-3 px-3 text-right font-mono">{s.todaySalesCount}</td>
-                          <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-700">
-                            {formatTSh(s.todayRevenueTzs)}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-wrap gap-1">
-                              {!s.active && (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 text-[9px] font-bold">
-                                  {isSw ? 'Imesimamishwa' : 'Suspended'}
-                                </span>
-                              )}
-                              {s.shiftOpen && (
-                                <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 text-[9px] font-bold">
-                                  {isSw ? 'Zamu' : 'Shift'}
-                                </span>
-                              )}
-                              {s.poshoClaimed && (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 text-[9px] font-bold">
-                                  Posho
-                                </span>
-                              )}
-                              {s.payrollUnpaid && s.active && (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 text-[9px] font-bold">
-                                  {isSw ? 'Haijalipwa' : 'Unpaid'}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          {canSwitch && (
-                            <td className="py-3 px-3 text-right">
-                              <button
-                                type="button"
-                                onClick={() => onSwitchToStaffSite?.(s)}
-                                className="p-1.5 rounded-lg hover:bg-blue-50 text-[#0078D4] cursor-pointer"
-                                title={isSw ? 'Ingia kituoni' : 'Open workstation'}
-                              >
-                                <LogIn className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          )}
                         </tr>
                       ))}
-                    {staffWithStats.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="py-10 text-center text-[#605E5C]">
-                          {isSw
-                            ? 'Hakuna wafanyakazi bado — ongeza kwenye Orodha.'
-                            : 'No staff yet — add people in Directory.'}
-                        </td>
-                      </tr>
-                    )}
                   </tbody>
                 </table>
               </div>
             </div>
-          </div>
 
-          <div className="lg:col-span-2 space-y-3">
-            <div className="bg-white rounded-xl border border-[#E1DFDD] p-4 space-y-3">
-              <h3 className="text-sm font-bold text-[#323130] flex items-center gap-2">
+            <div className="bg-white rounded-xl border border-[#d4e8dc] p-4 space-y-3">
+              <h3 className="text-sm font-bold text-[#1a3d2e] flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600" />
-                {isSw ? 'Vitendo vinavyosubiri' : 'HR action queue'}
+                {isSw ? 'Foleni ya HR' : 'HR queues'}
               </h3>
-              <ul className="space-y-2 text-xs">
-                <li className="flex items-center justify-between gap-2">
-                  <span className="text-[#605E5C]">{isSw ? 'Posho haijadaiwa leo' : 'Stipend not claimed today'}</span>
-                  <span className="font-bold">{activeCount - poshoTodayCount}</span>
+              <ul className="space-y-2 text-xs text-[#5a7a68]">
+                <li className="flex justify-between">
+                  <span>{isSw ? 'Likizo inayosubiri' : 'Pending time off'}</span>
+                  <span className="font-bold">{hrStore.timeOff.filter(t => t.status === 'pending').length}</span>
                 </li>
-                <li className="flex items-center justify-between gap-2">
-                  <span className="text-[#605E5C]">{isSw ? 'Mikopo inayosubiri' : 'Pending advances'}</span>
-                  <span className={`font-bold ${pendingAdvanceCount ? 'text-rose-600' : ''}`}>{pendingAdvanceCount}</span>
+                <li className="flex justify-between">
+                  <span>{isSw ? 'Mikopo' : 'Advances'}</span>
+                  <span className="font-bold">{pendingAdvanceCount}</span>
                 </li>
-                <li className="flex items-center justify-between gap-2">
-                  <span className="text-[#605E5C]">{isSw ? `Mishahara ${month}` : `Payroll ${month}`}</span>
-                  <span className={`font-bold ${unpaidPayrollCount ? 'text-rose-600' : 'text-emerald-700'}`}>
-                    {unpaidPayrollCount} {isSw ? 'haijalipwa' : 'unpaid'}
-                  </span>
+                <li className="flex justify-between">
+                  <span>{isSw ? 'Mishahara' : 'Payroll'}</span>
+                  <span className="font-bold">{unpaidPayrollCount}</span>
                 </li>
               </ul>
-              {onNavigate && (
-                <button
-                  type="button"
-                  onClick={() => onNavigate(unpaidPayrollCount ? 'payroll' : pendingAdvanceCount ? 'advances' : 'allowances')}
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-[#6264A7] text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer hover:bg-[#5557a0]"
-                >
-                  {isSw ? 'Fungua malipo' : 'Open pay hub'}
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            <div className="bg-gradient-to-br from-[#1a2832] to-[#2d3f4f] rounded-xl p-4 text-white space-y-2">
-              <p className="text-[11px] font-semibold text-white/70 uppercase tracking-wide">
-                {isSw ? 'Mchakato wa HR' : 'HR lifecycle'}
-              </p>
-              <ol className="text-xs space-y-1.5 text-white/90 list-decimal list-inside">
-                <li>{isSw ? 'Sajili mfanyakazi + nafasi + ruhusa' : 'Hire — role & permissions'}</li>
-                <li>{isSw ? 'Weka mshahara & posho' : 'Set salary & daily stipend rates'}</li>
-                <li>{isSw ? 'Fungua/funga zamu kwenye POS' : 'Open/close shifts at POS'}</li>
-                <li>{isSw ? 'Thibitisha posho & mikopo' : 'Confirm stipends & advances'}</li>
-                <li>{isSw ? 'Lipa mshahara wa mwezi + slipu' : 'Run monthly payroll + payslip'}</li>
-              </ol>
               <button
                 type="button"
-                onClick={() => setTab('directory')}
-                className="mt-2 w-full px-3 py-2 rounded-lg bg-white text-[#1a2832] text-xs font-bold cursor-pointer"
+                onClick={() => setTab('payroll')}
+                className="w-full px-3 py-2 rounded-lg bg-[#714b67] text-white text-xs font-bold cursor-pointer"
               >
-                {isSw ? 'Nenda kwenye orodha' : 'Go to directory'}
+                {isSw ? 'Kituo cha mishahara' : 'Open payroll workspace'}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {tab === 'recruitment' && (
+        <HrRecruitmentKanban
+          language={language}
+          applicants={hrStore.applicants}
+          onChange={applicants => persistHr({ applicants })}
+          onHire={() =>
+            showToast(
+              isSw
+                ? 'Mwombaji ameajiriwa — kamilisha rekodi kwenye Wafanyakazi.'
+                : 'Applicant hired — complete the employee record under Employees.',
+            )
+          }
+        />
+      )}
+
+      {tab === 'timeoff' && (
+        <HrTimeOffPanel
+          language={language}
+          staffList={staffList}
+          requests={hrStore.timeOff}
+          onChange={timeOff => persistHr({ timeOff })}
+        />
+      )}
+
+      {tab === 'appraisals' && (
+        <HrAppraisalsPanel
+          language={language}
+          staffList={staffList}
+          appraisals={hrStore.appraisals}
+          onChange={appraisals => persistHr({ appraisals })}
+        />
+      )}
+
+      {tab === 'reporting' && (
+        <HrReportingPanel language={language} staffList={staffList} branchName={activeBranchName || undefined} />
+      )}
+
       {tab === 'directory' && canTeam && (
-        <div className="bg-white rounded-xl border border-[#E1DFDD] p-4 md:p-5">
+        <div className="space-y-4">
+          {directoryDeptFilter && (
+            <button
+              type="button"
+              onClick={() => setDirectoryDeptFilter(undefined)}
+              className="text-xs font-bold text-[#107C10] cursor-pointer"
+            >
+              {isSw ? 'Onyesha idara zote' : 'Show all departments'}
+            </button>
+          )}
+        <div className="bg-white rounded-xl border border-[#d4e8dc] p-4 md:p-5">
           <StaffTeamPanel
             language={language}
             staffList={staffList}
             setStaffList={setStaffList}
             currentUser={currentUser}
+            activeBranchId={activeBranchId}
+            activeBranchName={activeBranchName}
             initialAddOpen={staffList.length === 0}
             addOpenSignal={addOpenSignal}
+            openStaffId={openStaffDetailId}
+            onDetailClosed={() => setOpenStaffDetailId(null)}
           />
+        </div>
         </div>
       )}
 
@@ -523,15 +699,27 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
                       {formatTSh(s.food + s.transport)}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      {canPay && (
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
-                          onClick={() => openRateEditor(s)}
-                          className="px-2.5 py-1 rounded-lg border border-[#E1DFDD] text-[10px] font-bold hover:bg-[#F3F2F1] cursor-pointer"
+                          onClick={() => {
+                            setOpenStaffDetailId(s.id);
+                            setTab('directory');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-[#107C10]/10 text-[#107C10] text-[10px] font-bold hover:bg-[#107C10]/20 cursor-pointer"
                         >
-                          {isSw ? 'Hariri' : 'Edit'}
+                          {isSw ? 'Angalia' : 'View'}
                         </button>
-                      )}
+                        {canPay && (
+                          <button
+                            type="button"
+                            onClick={() => openRateEditor(s)}
+                            className="px-2.5 py-1 rounded-lg border border-[#E1DFDD] text-[10px] font-bold hover:bg-[#F3F2F1] cursor-pointer"
+                          >
+                            {isSw ? 'Hariri' : 'Edit'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

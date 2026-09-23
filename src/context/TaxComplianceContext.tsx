@@ -115,7 +115,7 @@ export const TaxComplianceProvider: React.FC<TaxComplianceProviderProps> = ({
   }, [tinNumber, settings.tinNumber]);
 
   useEffect(() => {
-    if (!tenantId) return;
+    if (!tenantId || !api.hasValidSession()) return;
     api.getTenantSettings()
       .then(res => {
         const biz = res.business_settings ?? {};
@@ -135,7 +135,7 @@ export const TaxComplianceProvider: React.FC<TaxComplianceProviderProps> = ({
       const normalized = normalizeTaxComplianceSettings(next);
       setSettings(normalized);
       saveTaxComplianceSettings(tenantId, normalized);
-      if (tenantId) {
+      if (tenantId && api.hasValidSession()) {
         void api.updateTenantSettings({ business_settings: businessSettingsFromTax(normalized) }).catch(() => undefined);
       }
     },

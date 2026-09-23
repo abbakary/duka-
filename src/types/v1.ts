@@ -370,7 +370,14 @@ export interface DailyClosingData {
   status: 'reconciled' | 'discrepancy' | 'pending';
 }
 
-export type StaffRole = 'Owner' | 'Manager' | 'Pharmacist' | 'Cashier' | 'Storekeeper' | 'Accountant';
+export type StaffRole =
+  | 'Owner'
+  | 'Manager'
+  | 'HR'
+  | 'Pharmacist'
+  | 'Cashier'
+  | 'Storekeeper'
+  | 'Accountant';
 
 export interface StaffPermissions {
   canSellPOS: boolean;
@@ -407,6 +414,7 @@ export interface StaffMember {
   branch?: string;
   branchId?: string;
   shift: string;
+  avatarUrl?: string;
   avatarColor?: string;
   pinCode?: string;
   todaySalesCount: number;
@@ -454,6 +462,7 @@ export interface ExpenseItem {
   isRecurring?: boolean;
   status: 'paid' | 'pending' | 'reconciled';
   staffId?: string; // Linked staff member if allowance/salary
+  branchId?: string;
 }
 
 export interface StaffDailyAllowance {

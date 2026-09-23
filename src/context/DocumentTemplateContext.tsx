@@ -88,7 +88,7 @@ export const DocumentTemplateProvider: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!tenantId) {
+    if (!tenantId || !api.hasValidSession()) {
       setConfig(loadTenantDocumentConfig(tenantId, businessName));
       return;
     }
@@ -116,7 +116,7 @@ export const DocumentTemplateProvider: React.FC<Props> = ({
       setConfig(prev => {
         const next = updater(prev);
         saveTenantDocumentConfig(tenantId, next);
-        if (tenantId) {
+        if (tenantId && api.hasValidSession()) {
           void api.updateTenantSettings({
             document_config: documentConfigForApi(next),
           }).catch(() => undefined);

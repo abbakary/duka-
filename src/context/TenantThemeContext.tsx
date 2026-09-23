@@ -35,7 +35,7 @@ export const TenantThemeProvider: React.FC<Props> = ({ tenantId, children }) => 
   }, [theme]);
 
   useEffect(() => {
-    if (!tenantId) return;
+    if (!tenantId || !api.hasValidSession()) return;
     api.getTenantSettings()
       .then(res => {
         const fromApi = themeFromBusinessSettings(res.business_settings);
@@ -57,7 +57,7 @@ export const TenantThemeProvider: React.FC<Props> = ({ tenantId, children }) => 
     (next: TenantTheme) => {
       setTheme(next);
       saveTenantTheme(tenantId, next);
-      if (tenantId) {
+      if (tenantId && api.hasValidSession()) {
         void api.updateTenantSettings({ business_settings: themeToBusinessSettings(next) }).catch(() => undefined);
       }
     },
@@ -72,7 +72,7 @@ export const TenantThemeProvider: React.FC<Props> = ({ tenantId, children }) => 
           sidebarBg: patch.sidebarBg ?? prev.sidebarBg,
         };
         saveTenantTheme(tenantId, next);
-        if (tenantId) {
+        if (tenantId && api.hasValidSession()) {
           void api.updateTenantSettings({ business_settings: themeToBusinessSettings(next) }).catch(() => undefined);
         }
         return next;

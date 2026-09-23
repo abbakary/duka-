@@ -9,16 +9,31 @@ export function BusinessPageSubtitle({
   taxSettings,
   isSw,
   detail,
+  branchName,
 }: {
   currentUser?: AuthUser | null;
   taxSettings: TaxComplianceSettings;
   isSw: boolean;
   detail?: React.ReactNode;
+  /** Active working branch (Odoo company context), not tenant legal name only */
+  branchName?: string | null;
 }) {
   const business = currentUser?.businessName || (isSw ? 'Biashara Yako' : 'Your Business');
+  const branch =
+    branchName?.trim() ||
+    currentUser?.branchName?.trim() ||
+    currentUser?.branch?.trim() ||
+    null;
   return (
     <>
-      {business} • {getComplianceStatusLabel(taxSettings, isSw)}
+      {business}
+      {branch ? (
+        <>
+          {' '}
+          · <span className="font-semibold text-[#0F2347]">{branch}</span>
+        </>
+      ) : null}{' '}
+      · {getComplianceStatusLabel(taxSettings, isSw)}
       {detail ? <span className="block mt-1 text-[#605E5C] font-medium">{detail}</span> : null}
     </>
   );

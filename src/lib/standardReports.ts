@@ -33,7 +33,10 @@ export interface ReportCompanyInfo {
   email?: string;
   tinNumber?: string;
   vrn?: string;
+  /** Active working branch name (header switcher). */
   branch?: string;
+  branchCode?: string;
+  branchManager?: string;
   logoUrl?: string;
   businessType?: string;
 }

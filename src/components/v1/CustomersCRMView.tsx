@@ -29,7 +29,8 @@ import { api } from '@/lib/api';
 import { PageSectionHeader } from '@/components/v1/PageSectionHeader';
 import { useTaxCompliance } from '@/context/TaxComplianceContext';
 import { BusinessPageSubtitle } from '@/lib/businessPageSubtitle';
-import { mapCustomer, customerToApiPayload, filterByBranchId } from '@/lib/apiSync';
+import { mapCustomer, customerToApiPayload, filterByActiveBranch } from '@/lib/apiSync';
+import type { StoreBranch } from '@/types/v1';
 import { runWithOfflineQueue } from '@/lib/offlineMutations';
 import { useOfflineStore } from '@/stores';
 import type { SyncQueueItem } from '@/lib/transactionEngine';
@@ -45,6 +46,7 @@ interface CustomersCRMViewProps {
   enqueueSyncItem?: (item: SyncQueueItem) => void;
   onQueueMutation?: (entityType: string) => void;
   activeBranchId?: string | null;
+  branches?: StoreBranch[];
 }
 
 export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
@@ -58,6 +60,7 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
   enqueueSyncItem,
   onQueueMutation,
   activeBranchId,
+  branches = [],
 }) => {
   const t = (key: any) => getTranslation(language, key);
   const isSw = language === 'sw';
@@ -67,8 +70,8 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
   const enqueue = enqueueSyncItem ?? (() => {});
 
   const branchCustomers = useMemo(
-    () => filterByBranchId(customers, activeBranchId),
-    [customers, activeBranchId],
+    () => filterByActiveBranch(customers, activeBranchId, branches),
+    [customers, activeBranchId, branches],
   );
 
   const handleExportCustomers = () => {
@@ -165,7 +168,7 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
             branchId: (raw as { branch_id?: string }).branch_id ?? activeBranchId ?? undefined,
           };
           setCustomers(prev => {
-            const scoped = filterByBranchId(prev, activeBranchId);
+            const scoped = filterByActiveBranch(prev, activeBranchId, branches);
             return [created, ...scoped.filter(c => c.id !== created.id)];
           });
           setSelectedCustomerId(created.id);
@@ -191,7 +194,7 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
           dunningStage: 'cleared',
         };
         setCustomers(prev => {
-          const scoped = filterByBranchId(prev, activeBranchId);
+          const scoped = filterByActiveBranch(prev, activeBranchId, branches);
           return [localCustomer, ...scoped];
         });
         setSelectedCustomerId(tempId);

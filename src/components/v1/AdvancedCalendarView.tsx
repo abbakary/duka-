@@ -26,7 +26,8 @@ import { getTranslation } from '@/utils/translations';
 import { ActionBar } from '@/components/v1/ActionBar';
 import confetti from 'canvas-confetti';
 import { api } from '@/lib/api';
-import { mapEvent, eventToApiPayload, filterByBranchId } from '@/lib/apiSync';
+import { mapEvent, eventToApiPayload, filterByActiveBranch } from '@/lib/apiSync';
+import type { StoreBranch } from '@/types/v1';
 
 interface AdvancedCalendarViewProps {
   language: Language;
@@ -36,6 +37,7 @@ interface AdvancedCalendarViewProps {
   lowStockCount: number;
   overdueCreditCount: number;
   activeBranchId?: string | null;
+  branches?: StoreBranch[];
   currentUser?: AuthUser | null;
 }
 
@@ -47,6 +49,7 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
   lowStockCount,
   overdueCreditCount,
   activeBranchId,
+  branches = [],
   currentUser,
 }) => {
   const isSw = language === 'sw';
@@ -54,8 +57,8 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
   const { settings: taxSettings } = useTaxCompliance();
 
   const branchEvents = useMemo(
-    () => filterByBranchId(events, activeBranchId),
-    [events, activeBranchId],
+    () => filterByActiveBranch(events, activeBranchId, branches),
+    [events, activeBranchId, branches],
   );
 
   const [currentDate, setCurrentDate] = useState(new Date(2026, 7, 28)); // August 2026

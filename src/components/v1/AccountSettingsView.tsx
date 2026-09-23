@@ -114,7 +114,7 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
     { id: 'profile', labelEn: 'Profile', labelSw: 'Wasifu', icon: <Store className="w-3.5 h-3.5" /> },
     { id: 'branding', labelEn: 'Logo & Colors', labelSw: 'Nembo & Rangi', icon: <Palette className="w-3.5 h-3.5" /> },
     { id: 'team', labelEn: 'People & HR', labelSw: 'Watu & HR', icon: <Users className="w-3.5 h-3.5" />, managerOnly: true },
-    { id: 'compliance', labelEn: 'TRA & Tax', labelSw: 'TRA & Kodi', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+    { id: 'compliance', labelEn: 'TRA setup', labelSw: 'Usanidi TRA', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
     { id: 'documents', labelEn: 'Documents', labelSw: 'Hati', icon: <FileText className="w-3.5 h-3.5" /> },
     { id: 'billing', labelEn: 'Plan', labelSw: 'Malipo', icon: <CreditCard className="w-3.5 h-3.5" /> },
     { id: 'branches', labelEn: 'Branches', labelSw: 'Matawi', icon: <Building2 className="w-3.5 h-3.5" />, managerOnly: true },
@@ -263,8 +263,8 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
 
     try {
       const created = await api.createStaff({
-        name: newStaffForm.name,
-        email: newStaffForm.email,
+        name: newStaffForm.name.trim(),
+        email: newStaffForm.email.trim().toLowerCase(),
         phone: newStaffForm.phone,
         role: newStaffForm.role,
         password: newStaffForm.password,
@@ -933,6 +933,8 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
           language={language}
           businessName={businessName}
           tinNumber={tinNumber}
+          currentUser={currentUser}
+          onNavigate={onNavigate}
         />
       )}
 

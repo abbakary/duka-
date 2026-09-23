@@ -260,10 +260,19 @@ export function formatVatLabel(settings: TaxComplianceSettings, isSw: boolean): 
   return isSw ? `VAT (${pct}%)` : `VAT (${pct}%)`;
 }
 
+function traReceiptSerialSuffix(traEfdSerial: string): string {
+  const compact = (traEfdSerial || '').replace(/\s/g, '');
+  if (!compact) return 'EFD';
+  const parts = compact.split(/[-_/]/).filter(Boolean);
+  const last = parts[parts.length - 1] || compact;
+  const cleaned = last.replace(/^-+/, '').replace(/[^A-Za-z0-9]/g, '') || 'EFD';
+  return cleaned.slice(-12) || 'EFD';
+}
+
 export function generateReceiptNumber(settings: TaxComplianceSettings): string {
   const seq = Math.floor(1000 + Math.random() * 9000);
   if (settings.mode === 'tra_efd') {
-    const serial = settings.traEfdSerial.replace(/\s/g, '').slice(-6) || 'EFD';
+    const serial = traReceiptSerialSuffix(settings.traEfdSerial);
     return `TRA-${serial}-${seq}`;
   }
   return `RCP-${new Date().getFullYear()}-${seq}`;

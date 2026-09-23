@@ -21,7 +21,8 @@ import {
   Briefcase,
   Menu,
 } from 'lucide-react';
-import { BusinessType, Language, UserRole, AuthUser, TenantStore } from '@/types/v1';
+import { BusinessType, Language, UserRole, AuthUser, TenantStore, StoreBranch } from '@/types/v1';
+import { BranchSwitcher } from '@/components/v1/BranchSwitcher';
 
 interface HeaderProps {
   role?: UserRole;
@@ -48,6 +49,12 @@ interface HeaderProps {
   onSelectTenantToImpersonate?: (tenant: TenantStore) => void;
   onOpenQRScanner?: () => void;
   onToggleSidebar?: () => void;
+  branches?: StoreBranch[];
+  activeBranchId?: string | null;
+  activeBranchName?: string;
+  canSwitchBranch?: boolean;
+  branchSwitching?: boolean;
+  onSwitchBranch?: (branchId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -71,6 +78,12 @@ export const Header: React.FC<HeaderProps> = ({
   tenantsList = [],
   onSelectTenantToImpersonate,
   onToggleSidebar,
+  branches = [],
+  activeBranchId = null,
+  activeBranchName,
+  canSwitchBranch = false,
+  branchSwitching = false,
+  onSwitchBranch,
 }) => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isArchetypeMenuOpen, setIsArchetypeMenuOpen] = useState(false);
@@ -183,16 +196,25 @@ export const Header: React.FC<HeaderProps> = ({
                 />
               </div>
 
-              <div className="hidden 2xl:flex items-center gap-1 px-2 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 shrink-0 font-medium">
-                <Building2 className="w-3.5 h-3.5 text-[#6264A7]" />
-                <span className="font-bold text-[#323130] truncate max-w-[130px]">{currentUser?.branch || 'Kariakoo Flagship'}</span>
-              </div>
             </div>
           )}
         </div>
 
         {/* Right Section: All controls in single compact horizontal line */}
         <div className="flex items-center gap-2 shrink-0">
+          {!isSuperAdmin && currentUser && (branches.length > 0 || activeBranchName) && onSwitchBranch && (
+            <BranchSwitcher
+              language={language}
+              branches={branches}
+              activeBranchId={activeBranchId}
+              activeBranchName={activeBranchName || currentUser.branch}
+              canSwitch={canSwitchBranch}
+              switching={branchSwitching}
+              onSwitchBranch={onSwitchBranch}
+              variant="header"
+              className="hidden sm:inline-flex shrink-0"
+            />
+          )}
           {/* Quick Impersonate Dropdown (for Super Admin) */}
           {isSuperAdmin && tenantsList.length > 0 && onSelectTenantToImpersonate && (
             <div className="hidden xl:flex items-center gap-1.5 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200 text-xs text-amber-900 shadow-2xs shrink-0">
@@ -277,12 +299,19 @@ export const Header: React.FC<HeaderProps> = ({
               }`}>
                 {isSuperAdmin ? 'SA' : getInitials(currentUser?.name)}
               </div>
-              <div className="hidden xl:block text-left leading-tight pr-0.5 max-w-[130px]">
+              <div className="hidden md:block text-left leading-tight pr-0.5 max-w-[150px]">
                 <div className="text-xs font-extrabold text-[#323130] truncate">
                   {isSuperAdmin ? 'Super Admin' : (currentUser?.name || 'Salum Omar')}
                 </div>
-                <div className="text-[10px] font-bold text-[#6264A7] truncate">
-                  {isSuperAdmin ? 'Provider' : (currentUser?.branch || 'Kariakoo')}
+                <div className="text-[10px] font-bold text-[#6264A7] truncate flex items-center gap-1">
+                  {isSuperAdmin ? (
+                    'Provider'
+                  ) : (
+                    <>
+                      <Building2 className="w-3 h-3 shrink-0 hidden lg:inline" />
+                      {activeBranchName || currentUser?.branchName || currentUser?.branch || (isSw ? 'Tawi' : 'Branch')}
+                    </>
+                  )}
                 </div>
               </div>
               <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
@@ -295,11 +324,27 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="w-10 h-10 rounded-xl bg-[#6264A7] text-white flex items-center justify-center font-bold text-sm shadow-xs">
                     {getInitials(currentUser?.name)}
                   </div>
-                  <div>
-                    <h4 className="font-extrabold text-sm text-[#323130]">{currentUser?.name || 'Salum Omar'}</h4>
-                    <p className="text-[11px] text-slate-500">{currentUser?.email || 'admin@duka.co.tz'}</p>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-extrabold text-sm text-[#323130] truncate">{currentUser?.name || 'Salum Omar'}</h4>
+                    <p className="text-[11px] text-slate-500 truncate">{currentUser?.email || 'admin@duka.co.tz'}</p>
                   </div>
                 </div>
+
+                {!isSuperAdmin && currentUser && onSwitchBranch && (branches.length > 0 || activeBranchName) && (
+                  <div className="py-2 border-b border-slate-100 sm:hidden">
+                    <BranchSwitcher
+                      language={language}
+                      branches={branches}
+                      activeBranchId={activeBranchId}
+                      activeBranchName={activeBranchName || currentUser.branch}
+                      canSwitch={canSwitchBranch}
+                      switching={branchSwitching}
+                      onSwitchBranch={onSwitchBranch}
+                      variant="inline"
+                      className="w-full"
+                    />
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="pt-2 space-y-1">

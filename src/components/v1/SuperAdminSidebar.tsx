@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   Bell,
   Building2,
-  ChevronRight,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -51,33 +50,53 @@ export const SuperAdminSidebar: React.FC<SuperAdminSidebarProps> = ({
     onMobileClose?.();
   };
 
-  const link = (tab: string, icon: React.ReactNode, label: string, badge?: number | string) => {
+  const link = (
+    tab: string,
+    Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>,
+    label: string,
+    badge?: number | string,
+  ) => {
     const active = activeTab === tab;
     return (
-      <button
-        type="button"
-        onClick={() => nav(tab)}
-        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
-          active ? 'text-[#003322]' : 'text-white/85 hover:bg-white/8 hover:text-white'
-        }`}
-        style={active ? { backgroundColor: GOLD } : undefined}
-      >
-        <span className="flex items-center gap-3">
-          <span className={active ? 'text-[#003322]' : 'text-white/70'}>{icon}</span>
-          {label}
-        </span>
-        {badge != null && badge !== 0 && (
+      <li>
+        <button
+          type="button"
+          onClick={() => nav(tab)}
+          title={label}
+          className={`group w-full flex items-center gap-2 px-2 py-[0.45rem] rounded-lg text-left transition-all cursor-pointer ${
+            active ? 'text-[#003322] shadow-sm ring-1 ring-[#D4AF37]/40' : 'text-white/85 hover:bg-white/8 hover:text-white'
+          }`}
+          style={active ? { backgroundColor: GOLD } : undefined}
+        >
           <span
-            className={`min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-black flex items-center justify-center ${
-              active ? 'bg-[#003322] text-[#D4AF37]' : 'bg-[#D4AF37] text-[#003322]'
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+              active ? 'bg-[#003322]/10 text-[#003322]' : 'bg-white/5 text-white/65 group-hover:bg-white/10'
             }`}
           >
-            {badge}
+            <Icon className="h-[15px] w-[15px]" strokeWidth={2.25} />
           </span>
-        )}
-      </button>
+          <span className="flex-1 min-w-0 text-[11px] font-semibold leading-snug truncate">{label}</span>
+          {badge != null && badge !== 0 && (
+            <span
+              className={`shrink-0 min-w-[1rem] h-4 px-1 rounded-full text-[9px] font-black flex items-center justify-center ${
+                active ? 'bg-[#003322] text-[#D4AF37]' : 'bg-[#D4AF37] text-[#003322]'
+              }`}
+            >
+              {typeof badge === 'number' && badge > 99 ? '99+' : badge}
+            </span>
+          )}
+        </button>
+      </li>
     );
   };
+
+  const sectionLabel = (text: string) => (
+    <li className="list-none pt-2 first:pt-0">
+      <p className="px-2 pb-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: `${GOLD}cc` }}>
+        {text}
+      </p>
+    </li>
+  );
 
   return (
     <>
@@ -94,66 +113,63 @@ export const SuperAdminSidebar: React.FC<SuperAdminSidebarProps> = ({
         className={`
           fixed lg:relative z-[60] lg:z-30
           top-0 left-0
-          h-dvh lg:h-[calc(100dvh-1.5rem)]
-          w-[min(17.5rem,88vw)] lg:w-[17.5rem] lg:min-w-[17.5rem]
-          m-0 lg:m-3 lg:mr-2
-          flex flex-col rounded-none lg:rounded-2xl overflow-hidden shadow-xl select-none font-sans shrink-0
+          h-dvh lg:h-[calc(100dvh-1rem)]
+          w-[min(15.5rem,86vw)] lg:w-[11.75rem] lg:min-w-[11.75rem] lg:max-w-[11.75rem]
+          m-0 lg:my-2 lg:ml-2 lg:mr-0
+          flex flex-col rounded-none lg:rounded-xl overflow-hidden
+          border-0 lg:border lg:border-black/20
+          shadow-xl lg:shadow-md select-none font-sans shrink-0
           transition-transform duration-200 ease-out
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
         style={{ backgroundColor: FOREST }}
       >
-        <div className="p-5 border-b border-white/10">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-3 min-w-0">
-              <BrandLogo height={40} className="rounded-lg shrink-0" />
-              <div>
-                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: GOLD }}>
-                  {isSw ? 'Mtoa Huduma' : 'Provider'}
-                </p>
-              </div>
+        <div className="px-2.5 pt-2.5 pb-2 border-b border-white/10 bg-black/10">
+          <div className="flex items-center justify-between gap-1">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <BrandLogo height={28} className="rounded-md shrink-0" />
+              <p className="text-[10px] uppercase tracking-wide font-bold truncate" style={{ color: GOLD }}>
+                {isSw ? 'Mtoa Huduma' : 'Provider'}
+              </p>
             </div>
             {onMobileClose && (
               <button
                 type="button"
                 onClick={onMobileClose}
-                className="lg:hidden p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 cursor-pointer"
+                className="lg:hidden p-1 rounded-md text-white/70 hover:text-white hover:bg-white/10 cursor-pointer shrink-0"
                 aria-label={isSw ? 'Funga menyu' : 'Close menu'}
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
-          <div className="mt-4 px-3 py-2.5 rounded-xl bg-white/8 border border-white/10">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-bold text-white">{isSw ? 'Usimamizi wa Wateja' : 'Client management'}</span>
+          <div className="mt-2 px-2 py-1.5 rounded-lg bg-white/6 border border-white/10">
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="text-[10px] font-bold text-white truncate">
+                {isSw ? 'Usimamizi wa wateja' : 'Client management'}
+              </span>
             </div>
-            <p className="text-[10px] text-white/60 mt-1">{isSw ? 'Malipo • Vifurushi • Vikumbusho' : 'Billing • Plans • Reminders'}</p>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          <p className="px-3 text-[10px] font-black uppercase tracking-wider mb-2" style={{ color: GOLD }}>
-            {isSw ? 'Wateja' : 'Clients'}
-          </p>
-          {link('super-dashboard', <LayoutDashboard className="w-4 h-4" />, isSw ? 'Dashibodi' : 'Dashboard')}
-          {link('super-tenants', <Building2 className="w-4 h-4" />, isSw ? 'Orodha ya Wateja' : 'All clients', tenantsCount)}
-          {link('super-approvals', <ShieldCheck className="w-4 h-4" />, isSw ? 'Uthibitishaji KYC' : 'KYC queue', pendingApprovalsCount)}
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20">
+          <ul className="space-y-0.5">
+            {sectionLabel(isSw ? 'Wateja' : 'Clients')}
+            {link('super-dashboard', LayoutDashboard, isSw ? 'Dashibodi' : 'Dashboard')}
+            {link('super-tenants', Building2, isSw ? 'Wateja' : 'Clients', tenantsCount)}
+            {link('super-approvals', ShieldCheck, isSw ? 'KYC' : 'KYC queue', pendingApprovalsCount)}
 
-          <p className="px-3 pt-4 text-[10px] font-black uppercase tracking-wider mb-2" style={{ color: GOLD }}>
-            {isSw ? 'Malipo & Vifurushi' : 'Billing & plans'}
-          </p>
-          {link('super-subscriptions', <CreditCard className="w-4 h-4" />, isSw ? 'Malipo & Usajili' : 'Payments', unpaidCount || undefined)}
-          {link('super-plans', <Package className="w-4 h-4" />, isSw ? 'Vifurushi & Bei' : 'Plans & pricing')}
+            {sectionLabel(isSw ? 'Malipo' : 'Billing')}
+            {link('super-subscriptions', CreditCard, isSw ? 'Malipo' : 'Payments', unpaidCount || undefined)}
+            {link('super-plans', Package, isSw ? 'Vifurushi' : 'Plans')}
 
-          <p className="px-3 pt-4 text-[10px] font-black uppercase tracking-wider mb-2" style={{ color: GOLD }}>
-            {isSw ? 'Mawasiliano' : 'Outreach'}
-          </p>
-          {link('super-reminders', <Bell className="w-4 h-4" />, isSw ? 'Vikumbusho' : 'Reminders')}
+            {sectionLabel(isSw ? 'Mawasiliano' : 'Outreach')}
+            {link('super-reminders', Bell, isSw ? 'Vikumbusho' : 'Reminders')}
+          </ul>
         </nav>
 
-        <div className="p-4 border-t border-white/10 space-y-2">
+        <div className="px-1.5 py-2 border-t border-white/10 bg-black/10 space-y-1">
           {onGoToLanding && (
             <button
               type="button"
@@ -161,10 +177,10 @@ export const SuperAdminSidebar: React.FC<SuperAdminSidebarProps> = ({
                 onMobileClose?.();
                 onGoToLanding();
               }}
-              className="w-full flex items-center gap-2 text-xs text-white/70 hover:text-white cursor-pointer py-1"
+              className="w-full flex items-center justify-center gap-1.5 text-[10px] text-white/70 hover:text-white cursor-pointer py-1 rounded-lg hover:bg-white/5"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              {isSw ? 'Rudi kwenye tovuti ya wateja' : 'Back to client site'}
+              <ArrowLeft className="w-3 h-3 shrink-0" />
+              <span className="truncate">{isSw ? 'Tovuti ya wateja' : 'Client site'}</span>
             </button>
           )}
           {onSwitchToVendorMode && (
@@ -174,13 +190,10 @@ export const SuperAdminSidebar: React.FC<SuperAdminSidebarProps> = ({
                 onMobileClose?.();
                 onSwitchToVendorMode();
               }}
-              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl border border-white/15 text-xs font-bold text-white/90 hover:bg-white/8 cursor-pointer"
+              className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-white/15 text-[10px] font-bold text-white/90 hover:bg-white/8 cursor-pointer"
             >
-              <span className="flex items-center gap-2">
-                <Store className="w-4 h-4" style={{ color: GOLD }} />
-                {isSw ? 'Tazama kama duka' : 'Preview shop portal'}
-              </span>
-              <ChevronRight className="w-4 h-4" />
+              <Store className="w-3.5 h-3.5 shrink-0" style={{ color: GOLD }} />
+              <span className="truncate">{isSw ? 'Ona duka' : 'Shop preview'}</span>
             </button>
           )}
           <button
@@ -189,9 +202,9 @@ export const SuperAdminSidebar: React.FC<SuperAdminSidebarProps> = ({
               onMobileClose?.();
               onLogout();
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-300 hover:text-rose-200 cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-bold text-rose-300/95 hover:text-rose-100 cursor-pointer rounded-lg hover:bg-white/5"
           >
-            <LogOut className="w-4 h-4" /> {isSw ? 'Ondoka' : 'Sign out'}
+            <LogOut className="h-3.5 w-3.5 shrink-0" /> {isSw ? 'Ondoka' : 'Sign out'}
           </button>
         </div>
       </aside>

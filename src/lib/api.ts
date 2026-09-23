@@ -296,7 +296,11 @@ class ApiClient {
   createBranch(data: Record<string, unknown>) {
     return this.request<Record<string, unknown>>('/branches', { method: 'POST', body: JSON.stringify(data) });
   }
-  getStaff() { return this.request<Array<Record<string, unknown>>>('/staff'); }
+  getStaff(branchId?: string | null) {
+    const qs = branchScopeParams(branchId);
+    const q = Object.keys(qs).length ? `?${new URLSearchParams(qs)}` : '';
+    return this.request<Array<Record<string, unknown>>>(`/staff${q}`);
+  }
   createStaff(data: Record<string, unknown>) { return this.request('/staff', { method: 'POST', body: JSON.stringify(data) }); }
   updateStaff(id: string, data: Record<string, unknown>) { return this.request(`/staff/${id}`, { method: 'PATCH', body: JSON.stringify(data) }); }
   claimDailyStipend(data?: { food_amount?: number; transport_amount?: number }) {
@@ -305,7 +309,11 @@ class ApiClient {
       body: JSON.stringify(data ?? {}),
     });
   }
-  getExpenses() { return this.request<Array<Record<string, unknown>>>('/expenses'); }
+  getExpenses(branchId?: string | null) {
+    const qs = branchScopeParams(branchId);
+    const q = Object.keys(qs).length ? `?${new URLSearchParams(qs)}` : '';
+    return this.request<Array<Record<string, unknown>>>(`/expenses${q}`);
+  }
   createExpense(data: Record<string, unknown>) { return this.request('/expenses', { method: 'POST', body: JSON.stringify(data) }); }
   updateExpense(id: string, data: Record<string, unknown>) { return this.request(`/expenses/${id}`, { method: 'PATCH', body: JSON.stringify(data) }); }
   deleteExpense(id: string) { return this.request(`/expenses/${id}`, { method: 'DELETE' }); }
@@ -450,6 +458,152 @@ class ApiClient {
   getTenantSettings() {
     return this.request<{ document_config: Record<string, unknown>; business_settings: Record<string, unknown> }>('/tenant/settings');
   }
+
+  getTraEfdConfig() {
+    return this.request<Record<string, unknown>>('/tenant/tra-efd/config');
+  }
+
+  updateTraEfdConfig(data: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>('/tenant/tra-efd/config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  testTraEfdConnection() {
+    return this.request<{ ok: boolean; message: string; config?: Record<string, unknown> }>(
+      '/tenant/tra-efd/test-connection',
+      { method: 'POST' },
+    );
+  }
+
+  generateTraFiscalReceipt(body: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>('/tenant/tra-efd/generate-receipt', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  listTraFiscalReceipts(limit = 50) {
+    return this.request<Array<Record<string, unknown>>>(`/tenant/tra-efd/receipts?limit=${limit}`);
+  }
+
+  getLedgerAccounts() {
+    return this.request<Array<Record<string, unknown>>>('/tenant/accounting/accounts');
+  }
+
+  getJournalEntries(limit = 40) {
+    return this.request<Array<Record<string, unknown>>>(`/tenant/accounting/entries?limit=${limit}`);
+  }
+
+  createJournalEntry(data: Record<string, unknown>) {
+    return this.request<{ id: string }>('/tenant/accounting/entries', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  getTrialBalance() {
+    return this.request<{ as_of: string; rows: Array<Record<string, unknown>> }>(
+      '/tenant/accounting/reports/trial-balance',
+    );
+  }
+
+  getAccountingReportBundle(booksMode: 'standard' | 'tra', branchId?: string | null) {
+    const params = new URLSearchParams({ books_mode: booksMode });
+    if (branchId && branchId !== 'all') params.set('branch_id', branchId);
+    return this.request<import('./accountingApiTypes').AccountingReportBundle>(
+      `/tenant/accounting/reports/bundle?${params.toString()}`,
+    );
+  }
+
+  syncAccountingFromOperations(branchId?: string | null) {
+    const qs =
+      branchId && branchId !== 'all' ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+    return this.request<{ posted: number; scanned: number }>(
+      `/tenant/accounting/sync-from-operations${qs}`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  }
+
+  getHrWorkspace(branchId?: string | null) {
+    const qs =
+      branchId && branchId !== 'all' ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+    return this.request<{
+      applicants: Array<Record<string, unknown>>;
+      timeOff: Array<Record<string, unknown>>;
+      appraisals: Array<Record<string, unknown>>;
+    }>(`/tenant/hr/workspace${qs}`);
+  }
+
+  saveHrWorkspace(
+    data: {
+      applicants: Array<Record<string, unknown>>;
+      timeOff: Array<Record<string, unknown>>;
+      appraisals: Array<Record<string, unknown>>;
+    },
+    branchId?: string | null,
+  ) {
+    const qs =
+      branchId && branchId !== 'all' ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+    return this.request(`/tenant/hr/workspace${qs}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  getPayrollContracts() {
+    return this.request<Array<Record<string, unknown>>>('/tenant/payroll/contracts');
+  }
+
+  getPayrollEmployerSettings() {
+    return this.request<Record<string, unknown>>('/tenant/payroll/employer-settings');
+  }
+
+  savePayrollEmployerSettings(data: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>('/tenant/payroll/employer-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  upsertPayrollContract(data: Record<string, unknown>) {
+    return this.request<{ id: string; staff_id: string }>('/tenant/payroll/contracts', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  listPayslips(period?: string) {
+    const qs = period ? `?period=${encodeURIComponent(period)}` : '';
+    return this.request<Array<Record<string, unknown>>>(`/tenant/payroll/payslips${qs}`);
+  }
+
+  runPayrollPayslips(data: { period: string; staff: Array<Record<string, unknown>> }) {
+    return this.request<Record<string, unknown>>('/tenant/payroll/payslips/run', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  postPayrollToAccounting(data: {
+    period: string;
+    branch_id?: string | null;
+    gross: number;
+    net: number;
+    paye: number;
+    nssf_total: number;
+    nhif_total: number;
+    heslb: number;
+    sdl: number;
+    wcf: number;
+    employer_statutory: number;
+  }) {
+    return this.request<{ id: string; reference: string }>('/tenant/payroll/post-to-accounting', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
   getDocumentCatalog() {
     return this.request<{
       templates: Array<{ id: string; document_type: string; name: string; name_sw: string; layout: string; popular?: boolean }>;
@@ -483,6 +637,13 @@ class ApiClient {
   }
   deleteShowcaseItem(id: string) {
     return this.request(`/admin/showcase/${id}`, { method: 'DELETE' });
+  }
+
+  enrichSampleDemo() {
+    return this.request<{ ok: boolean; version: string; stats: Record<string, number> }>(
+      '/tenant/demo/enrich-sample',
+      { method: 'POST', body: JSON.stringify({}) },
+    );
   }
 }
 

@@ -79,6 +79,7 @@ interface BIAnalyticsDashboardProps {
   onOpenAIChatWithPrompt?: (prompt: string) => void;
   onNavigateToExpenses?: () => void;
   onNavigateToGeoMatrix?: () => void;
+  activeBranchName?: string | null;
 }
 
 export const BIAnalyticsDashboard: React.FC<BIAnalyticsDashboardProps> = ({
@@ -92,6 +93,7 @@ export const BIAnalyticsDashboard: React.FC<BIAnalyticsDashboardProps> = ({
   onOpenAIChatWithPrompt,
   onNavigateToExpenses,
   onNavigateToGeoMatrix,
+  activeBranchName,
 }) => {
   const isSw = language === 'sw';
   const t = (key: any) => getTranslation(language, key);
@@ -239,6 +241,11 @@ export const BIAnalyticsDashboard: React.FC<BIAnalyticsDashboardProps> = ({
               </h2>
             </div>
             <p className="text-sm text-slate-300 mt-1.5 max-w-2xl">
+              {activeBranchName ? (
+                <span className="block font-semibold text-amber-200/95 mb-1">
+                  {isSw ? 'Tawi:' : 'Branch:'} {activeBranchName}
+                </span>
+              ) : null}
               {isSw 
                 ? 'Punguza gharama, zuia upotevu wa mtaji, na ongeza faida halisi kupitia uchambuzi wa Bidhaa, Wateja, Matumizi na Mishahara.'
                 : 'Cut operating overheads, eliminate dead capital, and boost net cash margin through Item Pareto, Customer LTV, and Expense telemetry.'}

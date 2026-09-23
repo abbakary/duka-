@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Search, CheckCircle2, XCircle, Clock, FlaskConical } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Search, CheckCircle2, XCircle, Clock, FlaskConical, RefreshCw } from 'lucide-react';
 import type { Language } from '@/types/v1';
 import type { TraReceipt, TraReceiptStatus } from '@/types/traReceipt';
 import { formatTSh } from '@/utils/translations';
@@ -41,9 +41,14 @@ interface TraReceiptsSectionProps {
 
 export const TraReceiptsSection: React.FC<TraReceiptsSectionProps> = ({ language }) => {
   const isSw = language === 'sw';
-  const { receipts, selectedReceiptId, setSelectedReceiptId } = useTraReceipts();
+  const { receipts, selectedReceiptId, setSelectedReceiptId, refreshReceipts, receiptsLoading } =
+    useTraReceipts();
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<TraReceiptStatus | 'all'>('success');
+  const [statusFilter, setStatusFilter] = useState<TraReceiptStatus | 'all' | 'issued'>('all');
+
+  useEffect(() => {
+    void refreshReceipts();
+  }, [refreshReceipts]);
 
   const selectedReceipt = useMemo(
     () => receipts.find(r => r.id === selectedReceiptId),
@@ -52,8 +57,18 @@ export const TraReceiptsSection: React.FC<TraReceiptsSectionProps> = ({ language
 
   const filtered = useMemo(() => {
     let list = [...receipts];
-    if (statusFilter !== 'all') {
-      list = list.filter(r => r.status === statusFilter || (statusFilter === 'demo' && r.isDemo));
+    if (statusFilter === 'issued') {
+      list = list.filter(
+        r =>
+          r.status === 'success' ||
+          r.status === 'demo' ||
+          r.isDemo ||
+          Boolean(r.verificationCode && r.verificationCode !== '—'),
+      );
+    } else if (statusFilter !== 'all') {
+      list = list.filter(
+        r => r.status === statusFilter || (statusFilter === 'demo' && (r.isDemo || r.status === 'demo')),
+      );
     }
     const q = query.trim().toLowerCase();
     if (q) {
@@ -80,7 +95,16 @@ export const TraReceiptsSection: React.FC<TraReceiptsSectionProps> = ({ language
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-[#E1DFDD] p-4 shadow-xs flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-end">
+      <div className="bg-white rounded-xl border border-[#E1DFDD] p-4 shadow-xs flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <button
+          type="button"
+          onClick={() => void refreshReceipts()}
+          disabled={receiptsLoading}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E1DFDD] text-xs font-semibold self-start"
+        >
+          <RefreshCw className={`w-4 h-4 ${receiptsLoading ? 'animate-spin' : ''}`} />
+          {isSw ? 'Sawazisha kutoka seva' : 'Sync from server'}
+        </button>
         <div className="flex flex-1 flex-col sm:flex-row gap-2 sm:max-w-xl sm:ml-auto">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#605E5C]" />
@@ -94,10 +118,11 @@ export const TraReceiptsSection: React.FC<TraReceiptsSectionProps> = ({ language
           </div>
           <select
             value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as TraReceiptStatus | 'all')}
+            onChange={e => setStatusFilter(e.target.value as TraReceiptStatus | 'all' | 'issued')}
             className="px-3 py-2 rounded-lg border border-[#E1DFDD] text-sm bg-white"
           >
             <option value="all">{isSw ? 'Zote' : 'All'}</option>
+            <option value="issued">{isSw ? 'Zilizotolewa (pamoja na demo)' : 'Issued (incl. demo)'}</option>
             <option value="success">Success</option>
             <option value="failed">Failed</option>
             <option value="demo">Demo</option>

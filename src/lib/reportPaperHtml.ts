@@ -31,16 +31,30 @@ function companyHeader(company: ReportCompanyInfo, isSw: boolean): string {
     ? `<img src="${esc(company.logoUrl)}" alt="" style="max-height:52px;max-width:120px;object-fit:contain" />`
     : `<div style="width:52px;height:52px;border-radius:8px;background:#0F2347;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px">D+</div>`;
 
+  const ownerOrMgr =
+    company.branchManager && company.branchManager !== company.ownerName
+      ? `${isSw ? 'Meneja tawi' : 'Branch manager'}: ${esc(company.branchManager)}`
+      : company.ownerName
+        ? `${isSw ? 'Mmiliki' : 'Owner'}: ${esc(company.ownerName)}`
+        : '';
+
+  const branchLine = company.branch
+    ? `<div style="font-size:13px;font-weight:800;color:#6264A7;margin-top:5px">${isSw ? 'Tawi linalochaguliwa' : 'Selected branch'}: ${esc(company.branch)}${
+        company.branchCode ? ` <span style="font-weight:600;color:#4B5563">(${esc(company.branchCode)})</span>` : ''
+      }</div>`
+    : '';
+
   return `
   <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:2px solid #0F2347;padding-bottom:12px;margin-bottom:14px">
     <div style="display:flex;gap:12px;align-items:flex-start">
       ${logo}
       <div>
         <div style="font-size:18px;font-weight:800;color:#0F2347;letter-spacing:-0.02em">${esc(company.businessName || 'Duka+')}</div>
-        ${company.address ? `<div style="font-size:11px;color:#4B5563;margin-top:2px">${esc(company.address)}</div>` : ''}
+        ${branchLine}
+        ${company.address ? `<div style="font-size:11px;color:#4B5563;margin-top:4px">${esc(company.address)}</div>` : ''}
         <div style="font-size:11px;color:#4B5563;margin-top:2px">
           ${[
-            company.ownerName ? `${isSw ? 'Mmiliki' : 'Owner'}: ${esc(company.ownerName)}` : '',
+            ownerOrMgr,
             company.phone ? `${isSw ? 'Simu' : 'Tel'}: ${esc(company.phone)}` : '',
             company.email ? esc(company.email) : '',
           ].filter(Boolean).join(' · ')}
@@ -50,8 +64,8 @@ function companyHeader(company: ReportCompanyInfo, isSw: boolean): string {
     <div style="text-align:right;font-size:11px;color:#374151;line-height:1.55">
       ${company.tinNumber ? `<div><strong>TIN</strong>: ${esc(company.tinNumber)}</div>` : ''}
       ${company.vrn ? `<div><strong>VRN</strong>: ${esc(company.vrn)}</div>` : ''}
-      ${company.branch ? `<div><strong>${isSw ? 'Tawi' : 'Branch'}</strong>: ${esc(company.branch)}</div>` : ''}
-      ${company.businessType ? `<div>${esc(company.businessType)}</div>` : ''}
+      ${company.branchCode ? `<div><strong>${isSw ? 'Msimbo tawi' : 'Branch code'}</strong>: ${esc(company.branchCode)}</div>` : ''}
+      ${company.businessType ? `<div style="margin-top:2px;font-weight:600">${esc(company.businessType)}</div>` : ''}
     </div>
   </div>`;
 }
@@ -131,7 +145,7 @@ function footerNote(isSw: boolean, extra?: string): string {
   </div>`;
 }
 
-function wrapPaper(inner: string, opts?: { landscape?: boolean }): string {
+export function wrapReportPaper(inner: string, opts?: { landscape?: boolean }): string {
   const landscape = Boolean(opts?.landscape);
   const width = landscape ? '297mm' : '210mm';
   const pageRule = landscape
@@ -155,11 +169,11 @@ function wrapPaper(inner: string, opts?: { landscape?: boolean }): string {
     }
   </style>
   <div class="duka-report-paper" data-orientation="${landscape ? 'landscape' : 'portrait'}" style="
-    width:${width};max-width:100%;margin:0 auto;background:#fff;
+    width:${width};min-width:${width};max-width:none;margin:0 auto;background:#fff;
     color:#111;padding:10mm 8mm;box-sizing:border-box;
     font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
     box-shadow:0 12px 40px rgba(15,35,71,0.12);border:1px solid #E5E7EB;
-    overflow:hidden;
+    overflow-x:auto;overflow-y:visible;
   ">
     ${inner}
   </div>`;
@@ -212,7 +226,7 @@ export function renderSalesDetailPaper(opts: {
     })}
     ${footerNote(isSw)}
   `;
-  return wrapPaper(inner, { landscape: true });
+  return wrapReportPaper(inner, { landscape: true });
 }
 
 export function renderSalesVatSummaryPaper(opts: {
@@ -269,7 +283,7 @@ export function renderSalesVatSummaryPaper(opts: {
     </div>
     ${footerNote(isSw)}
   `;
-  return wrapPaper(inner);
+  return wrapReportPaper(inner);
 }
 
 export function renderInventoryValuationPaper(opts: {
@@ -331,8 +345,8 @@ export function renderInventoryValuationPaper(opts: {
     ${titleBlock(
       isSw ? 'Thamani ya Stoo (Inventory Valuation)' : 'Inventory Valuation Report',
       isSw
-        ? 'Mtindo wa Odoo — maelezo kamili ya bidhaa, batch, muda wa kutolewa, wingi × gharama'
-        : 'Odoo-style — full product details, batch/expiry, generated time, qty × cost',
+        ? 'Maelezo kamili ya bidhaa, batch, muda wa kutolewa, wingi × gharama'
+        : 'Full product details, batch/expiry, generated time, qty × cost',
       period,
       isSw,
     )}
@@ -353,7 +367,7 @@ export function renderInventoryValuationPaper(opts: {
         : 'Cost value = on-hand qty × purchase cost. Sell price shown for comparison.',
     )}
   `;
-  return wrapPaper(inner, { landscape: true });
+  return wrapReportPaper(inner, { landscape: true });
 }
 
 export function renderPurchaseOrdersPaper(opts: {
@@ -403,5 +417,5 @@ export function renderPurchaseOrdersPaper(opts: {
     })}
     ${footerNote(isSw)}
   `;
-  return wrapPaper(inner, { landscape: true });
+  return wrapReportPaper(inner, { landscape: true });
 }

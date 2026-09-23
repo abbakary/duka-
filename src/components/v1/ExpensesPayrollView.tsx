@@ -68,6 +68,9 @@ interface ExpensesPayrollViewProps {
   onOpenAIChatWithPrompt?: (prompt: string) => void;
   initialTab?: 'expenses' | 'allowances' | 'payroll' | 'advances' | 'team';
   tenantStorageId?: string;
+  activeBranchId?: string | null;
+  activeBranchName?: string | null;
+  onOpenStatutoryPayroll?: () => void;
 }
 
 export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
@@ -80,6 +83,9 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
   currentUser,
   initialTab = 'expenses',
   tenantStorageId,
+  activeBranchId,
+  activeBranchName,
+  onOpenStatutoryPayroll,
 }) => {
   const isSw = language === 'sw';
   const t = (key: any) => getTranslation(language, key);
@@ -121,35 +127,39 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
   const [staffConfig, setStaffConfig] = useState<Record<string, StaffPayrollConfig>>({});
 
   useEffect(() => {
-    const stored = loadPayrollStore(tenantId);
+    const stored = loadPayrollStore(tenantId, activeBranchId);
     const synced = syncAllowancesFromStipendExpenses(stored, expensesProp, staffList);
     setDailyAllowances(synced.dailyAllowances);
     setAdvances(synced.advances);
     setPayrollRecords(synced.payrollRecords);
     setStaffConfig(synced.staffConfig);
     if (synced.dailyAllowances.length !== stored.dailyAllowances.length) {
-      savePayrollStore(tenantId, synced);
+      savePayrollStore(tenantId, synced, activeBranchId);
     }
-  }, [tenantId, expensesProp, staffList]);
+  }, [tenantId, activeBranchId, expensesProp, staffList]);
 
   useEffect(() => {
     if (activeTab !== 'allowances' && activeTab !== 'advances') return;
-    const stored = loadPayrollStore(tenantId);
+    const stored = loadPayrollStore(tenantId, activeBranchId);
     const synced = syncAllowancesFromStipendExpenses(stored, expensesProp, staffList);
     setDailyAllowances(synced.dailyAllowances);
     setAdvances(synced.advances);
     setPayrollRecords(synced.payrollRecords);
     setStaffConfig(synced.staffConfig);
-  }, [activeTab, tenantId, expensesProp, staffList]);
+  }, [activeTab, tenantId, activeBranchId, expensesProp, staffList]);
 
   useEffect(() => {
-    savePayrollStore(tenantId, {
-      dailyAllowances,
-      advances,
-      payrollRecords,
-      staffConfig,
-    });
-  }, [tenantId, dailyAllowances, advances, payrollRecords, staffConfig]);
+    savePayrollStore(
+      tenantId,
+      {
+        dailyAllowances,
+        advances,
+        payrollRecords,
+        staffConfig,
+      },
+      activeBranchId,
+    );
+  }, [tenantId, activeBranchId, dailyAllowances, advances, payrollRecords, staffConfig]);
 
   useEffect(() => {
     setExpensesLocal(expensesProp);
@@ -271,14 +281,20 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
     if (!newExpenseTitle || !newExpenseAmount || Number(newExpenseAmount) <= 0) return;
 
     try {
-      const raw = await api.createExpense(expenseToApiPayload({
-        title: newExpenseTitle,
-        category: newExpenseCategory,
-        amount: Number(newExpenseAmount),
-        paymentMethod: newExpenseMethod,
-        recipient: newExpenseRecipient || 'General Vendor',
-        notes: newExpenseNotes,
-      }));
+      const raw = await api.createExpense(
+        expenseToApiPayload(
+          {
+            title: newExpenseTitle,
+            category: newExpenseCategory,
+            amount: Number(newExpenseAmount),
+            paymentMethod: newExpenseMethod,
+            recipient: newExpenseRecipient || 'General Vendor',
+            notes: newExpenseNotes,
+            branchId: activeBranchId ?? undefined,
+          },
+          activeBranchId,
+        ),
+      );
       const created = mapExpense(raw as Record<string, unknown>);
       setExpenses(prev => [created, ...prev]);
       setIsAddExpenseOpen(false);
@@ -457,14 +473,20 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
     setDailyAllowances(prev => [record, ...prev.filter(a => !(a.staffId === staff.id && a.date === todayStr))]);
     if (canManage) {
       try {
-        const raw = await api.createExpense(expenseToApiPayload({
-          title: `Posho ya leo — ${staff.name}`,
-          category: 'daily_stipends_food_transport',
-          amount: total,
-          paymentMethod: 'cash_drawer',
-          recipient: staff.name,
-          notes: `Chakula ${rates.food} + Nauli ${rates.transport}`,
-        }));
+        const raw = await api.createExpense(
+          expenseToApiPayload(
+            {
+              title: `Posho ya leo — ${staff.name}`,
+              category: 'daily_stipends_food_transport',
+              amount: total,
+              paymentMethod: 'cash_drawer',
+              recipient: staff.name,
+              notes: `Chakula ${rates.food} + Nauli ${rates.transport}`,
+              branchId: activeBranchId ?? undefined,
+            },
+            activeBranchId,
+          ),
+        );
         const created = mapExpense(raw as Record<string, unknown>);
         setExpenses(prev => [created, ...prev]);
       } catch (err) {
@@ -514,14 +536,20 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
 
     if (canManage) {
       try {
-        const raw = await api.createExpense(expenseToApiPayload({
-          title: `Mshahara ${selectedMonth} — ${staff.name}`,
-          category: 'staff_salaries',
-          amount: net,
-          paymentMethod: method.includes('M-Pesa') ? 'mpesa_till' : 'bank_transfer',
-          recipient: staff.name,
-          notes: newRecord.notes,
-        }));
+        const raw = await api.createExpense(
+          expenseToApiPayload(
+            {
+              title: `Mshahara ${selectedMonth} — ${staff.name}`,
+              category: 'staff_salaries',
+              amount: net,
+              paymentMethod: method.includes('M-Pesa') ? 'mpesa_till' : 'bank_transfer',
+              recipient: staff.name,
+              notes: newRecord.notes,
+              branchId: activeBranchId ?? undefined,
+            },
+            activeBranchId,
+          ),
+        );
         const created = mapExpense(raw as Record<string, unknown>);
         setExpenses(prev => [created, ...prev]);
       } catch (err) {
@@ -545,9 +573,14 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
               </h2>
             </div>
             <p className="text-sm text-slate-300 mt-1.5 max-w-2xl">
+              {activeBranchName ? (
+                <span className="block font-semibold text-rose-200/95 mb-1">
+                  {isSw ? 'Tawi:' : 'Branch:'} {activeBranchName}
+                </span>
+              ) : null}
               {isSw 
-                ? 'Dhibiti matumizi yote ya duka (Kodi, LUKU, DAWASA, Stoo), fuatilia posho za kila siku za wafanyakazi (Chakula na Nauli), na fanya malipo ya mishahara ya mwezi.'
-                : 'Full-stack financial tracking for operating overheads, daily staff stipends (food/transit), salary advances, and monthly statutory payroll.'}
+                ? 'Matumizi, posho, na mishahara ya tawi hili tu — hakuna mchanganyiko na matawi mengine.'
+                : 'Operating costs, stipends, and payroll for this branch only — not mixed with other locations.'}
             </p>
           </div>
 
@@ -1029,6 +1062,27 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
       {/* TAB 3: MONTHLY PAYROLL MATRIX & PAYSLIPS */}
       {activeTab === 'payroll' && (
         <div className="space-y-6">
+          {onOpenStatutoryPayroll && canPayroll && (
+            <div className="rounded-xl border border-[#714b67]/30 bg-[#f1e9ef] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-[#714b67]">
+                  {isSw ? 'Mishahara ya kisheria (PAYE, NSSF, NHIF, SDL, WCF, HESLB)' : 'Full statutory payroll (PAYE, NSSF, NHIF, SDL, WCF, HESLB)'}
+                </p>
+                <p className="text-xs text-[#5a4a56] mt-0.5">
+                  {isSw
+                    ? 'Tumia kituo cha mishahara kwa mkataba, mizunguko, slip, na kuchapisha uhasibuni.'
+                    : 'Use the payroll workspace for contracts, runs, payslips, TRA schedules, and posting to accounting.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenStatutoryPayroll}
+                className="shrink-0 px-4 py-2.5 rounded-lg bg-[#714b67] text-white text-xs font-bold cursor-pointer"
+              >
+                {isSw ? 'Fungua kituo cha mishahara' : 'Open payroll workspace'}
+              </button>
+            </div>
+          )}
           <div className="bg-white rounded-2xl border border-[#E1DFDD] shadow-xs p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#F3F2F1] pb-4">
               <div>
@@ -1301,6 +1355,8 @@ export const ExpensesPayrollView: React.FC<ExpensesPayrollViewProps> = ({
             staffList={staffList}
             setStaffList={setStaffList}
             currentUser={currentUser}
+            activeBranchId={activeBranchId}
+            activeBranchName={activeBranchName}
           />
         </div>
       )}

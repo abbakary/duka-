@@ -53,7 +53,7 @@ import { rememberProductImage } from '@/lib/productImageCache';
 import { compressProductImage, readFileAsDataUrl } from '@/lib/imageCompress';
 import confetti from 'canvas-confetti';
 import { api } from '@/lib/api';
-import { fetchProductsFromApi, mapProduct, mapStockMovement, mapSupplier, optionalApiDate, productToApiPayload, supplierToApiPayload } from '@/lib/apiSync';
+import { mapProduct, mapStockMovement, mapSupplier, optionalApiDate, productToApiPayload, supplierToApiPayload } from '@/lib/apiSync';
 import { runWithOfflineQueue } from '@/lib/offlineMutations';
 import { useOfflineStore } from '@/stores';
 import type { SyncQueueItem } from '@/lib/transactionEngine';
@@ -79,6 +79,7 @@ interface InventoryViewProps {
   onProductsChanged?: () => void | Promise<void>;
   currentUser?: import('@/types/v1').AuthUser | null;
   tenantId?: string;
+  activeBranchId?: string | null;
   enqueueSyncItem?: (item: SyncQueueItem) => void;
   onQueueMutation?: (entityType: string) => void;
 }
@@ -101,6 +102,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onProductsChanged,
   currentUser,
   tenantId,
+  activeBranchId,
   enqueueSyncItem,
   onQueueMutation,
 }) => {
@@ -502,26 +504,29 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     if (newProduct.supplierId) supplierMeta.supplier_id = newProduct.supplierId;
 
     const payload = {
-      ...productToApiPayload({
-        name: newProduct.name,
-        category: categorySel.displayPath || newProduct.category,
-        sku: newProduct.sku,
-        price: Number(newProduct.price),
-        cost: Number(newProduct.cost),
-        stock: Number(newProduct.stock),
-        reorderPoint: Number(newProduct.reorderPoint),
-        unit: newProduct.unit,
-        batchNumber: dynamicFields.batch_number ?? newProduct.batchNumber,
-        expiryDate: dynamicFields.expiry_date ?? newProduct.expiryDate,
-        requiresPrescription: Boolean(dynamicFields.requires_prescription),
-        businessType,
-        imageUrl: newProduct.imageUrl || undefined,
-        vatType: newProduct.vatType,
-        metadata_json: {
-          ...(dynamicFields.metadata || {}),
-          ...supplierMeta,
+      ...productToApiPayload(
+        {
+          name: newProduct.name,
+          category: categorySel.displayPath || newProduct.category,
+          sku: newProduct.sku,
+          price: Number(newProduct.price),
+          cost: Number(newProduct.cost),
+          stock: Number(newProduct.stock),
+          reorderPoint: Number(newProduct.reorderPoint),
+          unit: newProduct.unit,
+          batchNumber: dynamicFields.batch_number ?? newProduct.batchNumber,
+          expiryDate: dynamicFields.expiry_date ?? newProduct.expiryDate,
+          requiresPrescription: Boolean(dynamicFields.requires_prescription),
+          businessType,
+          imageUrl: newProduct.imageUrl || undefined,
+          vatType: newProduct.vatType,
+          metadata_json: {
+            ...(dynamicFields.metadata || {}),
+            ...supplierMeta,
+          },
         },
-      }),
+        activeBranchId,
+      ),
       business_type: businessType,
     };
     const tempId = `local-prod-${Date.now()}`;
@@ -548,34 +553,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           }
           // Show photo immediately — never wait on a full catalog refresh
           setProducts(prev => [withImage, ...prev.filter(p => p.id !== withImage.id && p.id !== tempId)]);
-          // Background refresh; always keep local photos
-          void fetchProductsFromApi(undefined, storageId)
-            .then(refreshed => {
-              setProducts(prev => {
-                const priorById = new Map(prev.map(p => [p.id, p]));
-                priorById.set(withImage.id, withImage);
-                const byId = new Map(
-                  refreshed.map(p => {
-                    const prior = priorById.get(p.id);
-                    return [
-                      p.id,
-                      {
-                        ...p,
-                        imageUrl:
-                          p.imageUrl ||
-                          prior?.imageUrl ||
-                          (p.id === withImage.id ? withImage.imageUrl : undefined),
-                      },
-                    ] as const;
-                  }),
-                );
-                if (!byId.has(withImage.id)) byId.set(withImage.id, withImage);
-                return Array.from(byId.values());
-              });
-            })
-            .catch(() => {
-              /* already have withImage in state */
-            });
+          void onProductsChanged?.();
         },
         onQueued: () => onQueueMutation?.('product'),
       });
@@ -1086,7 +1064,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               />
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs font-semibold">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
               <button
                 onClick={() => {
                   setQrModalProduct(products[0] || null);
@@ -1125,10 +1103,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
           </div>
 
-          {/* PRODUCTS DATA TABLE */}
-          <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs overflow-hidden">
+          {/* PRODUCTS — desktop table */}
+          <div className="hidden md:block bg-white rounded-xl border border-[#E1DFDD] shadow-xs overflow-hidden">
             <div>
-              <table className="w-full text-left text-[10px] sm:text-xs" style={{ tableLayout: 'fixed' }}>
+              <table className="w-full text-left text-xs" style={{ tableLayout: 'auto' }}>
                 <thead className="bg-[#F8F8F8] border-b border-[#EDEBE9] text-[#605E5C] font-bold uppercase tracking-wider">
                   <tr>
                     <th className="py-2 px-3" style={{ width: '28%' }}>{isSw ? 'Picha & Bidhaa' : 'Photo & Product'}</th>
@@ -1279,6 +1257,142 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </table>
             </div>
           </div>
+
+          {/* PRODUCTS — mobile cards */}
+          <div className="md:hidden space-y-3">
+            {filteredProducts.map(prod => {
+              const isLow = prod.stock <= prod.reorderPoint;
+              const isCritical = prod.stock <= 5;
+              const isSelected = selectedProductId === prod.id;
+
+              return (
+                <article
+                  key={prod.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedProductId(prod.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedProductId(prod.id);
+                    }
+                  }}
+                  className={`bg-white rounded-xl border shadow-xs p-3 text-left cursor-pointer transition-colors ${
+                    isSelected ? 'border-[#6264A7] bg-[#F0F2FA]' : 'border-[#E1DFDD]'
+                  }`}
+                >
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      title={isSw ? 'Badilisha picha' : 'Change photo'}
+                      className="relative shrink-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6264A7]"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setPhotoPickProductId(prod.id);
+                        photoFileRef.current?.click();
+                      }}
+                    >
+                      <ProductImageThumb src={prod.imageUrl} name={prod.name} size="lg" />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-bold text-sm text-[#323130] leading-snug break-words">{prod.name}</h4>
+                      <p className="text-xs text-[#605E5C] mt-0.5">{prod.category}</p>
+                      <ProductMetaBadges
+                        product={prod}
+                        businessType={businessType}
+                        language={language}
+                        max={3}
+                        className="mt-1"
+                      />
+                      <p className="text-[11px] font-mono text-[#605E5C] mt-1">
+                        {showBatch && prod.batchNumber ? `${prod.sku} · ${prod.batchNumber}` : prod.sku}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-[#F8F8F8] px-2.5 py-2">
+                      <div className="text-[10px] font-bold uppercase text-[#8A8886]">
+                        {isSw ? 'Bei' : 'Price'}
+                      </div>
+                      <div className="font-bold text-[#0078D4] font-mono">{formatTSh(prod.price)}</div>
+                    </div>
+                    <div className="rounded-lg bg-[#F8F8F8] px-2.5 py-2">
+                      <div className="text-[10px] font-bold uppercase text-[#8A8886]">
+                        {isSw ? 'Stoo' : 'Stock'}
+                      </div>
+                      <div
+                        className={`font-extrabold ${
+                          isCritical ? 'text-[#D13438]' : isLow ? 'text-amber-600' : 'text-[#107C10]'
+                        }`}
+                      >
+                        {prod.stock} {prod.unit}
+                        {isLow && (
+                          <span className="ml-1 text-[10px] font-bold">
+                            {isCritical ? (isSw ? '· hatari' : '· critical') : (isSw ? '· chini' : '· low')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-[#605E5C]">
+                        {isSw ? 'Kiwango cha chini' : 'Reorder'}: {prod.reorderPoint}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className="mt-3 grid grid-cols-2 gap-2"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQrModalProduct(prod);
+                        setIsQRModalOpen(true);
+                      }}
+                      className="col-span-2 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-indigo-50 text-[#6264A7] border border-indigo-200 font-bold text-xs cursor-pointer"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      {isSw ? 'Lebo ya QR / mshelf' : 'QR shelf label'}
+                    </button>
+                    {!inventoryReadOnly && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStockOutForm(prev => ({ ...prev, productId: prod.id, quantity: 1 }));
+                            setIsStockOutOpen(true);
+                          }}
+                          className="py-2.5 rounded-lg bg-rose-50 text-rose-800 border border-rose-200 font-bold text-xs cursor-pointer"
+                        >
+                          − {isSw ? 'Toa stoo' : 'Stock out'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManualStockInForm(prev => ({ ...prev, productId: prod.id, unitCost: prod.cost }));
+                            setIsQuickStockInOpen(true);
+                          }}
+                          className="py-2.5 rounded-lg bg-[#107C10] text-white font-bold text-xs shadow-xs cursor-pointer"
+                        >
+                          + {isSw ? 'Ongeza stoo' : 'Stock in'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            openEditProduct(prod);
+                          }}
+                          className="col-span-2 py-2.5 rounded-lg bg-[#EFF6FF] text-[#1D4ED8] border border-blue-200 font-bold text-xs cursor-pointer"
+                        >
+                          {isSw ? 'Hariri bidhaa' : 'Edit product'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -1341,11 +1455,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </div>
 
                   <button
+                    type="button"
                     onClick={() => handleQuickReceivePO(po)}
-                    className="w-full py-2.5 rounded-xl bg-[#107C10] hover:bg-[#0E6A0E] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                    className="w-full py-3 rounded-xl bg-[#107C10] hover:bg-[#0E6A0E] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                   >
-                    <PackageCheck className="w-4 h-4" />
-                    <span>1-Click Receive & Stock Into Inventory</span>
+                    <PackageCheck className="w-4 h-4 shrink-0" />
+                    <span>{isSw ? 'Pokea na ingiza stoo (bonyeza moja)' : 'Receive & stock in'}</span>
                   </button>
                 </div>
               ))

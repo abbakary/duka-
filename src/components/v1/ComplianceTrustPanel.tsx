@@ -1,25 +1,28 @@
 import React from 'react';
-import type { Language } from '@/types/v1';
-import { TraEfdPage } from '@/components/v1/tra/TraEfdPage';
+import type { AuthUser, Language } from '@/types/v1';
+import { TraEfdSetupView } from '@/components/v1/tra/TraEfdSetupView';
 
 interface ComplianceTrustPanelProps {
   language: Language;
   businessName?: string;
   tinNumber?: string;
-  /** @deprecated TRA hub is embedded on this same page */
+  currentUser?: AuthUser | null;
+  onNavigate?: (tab: string) => void;
+  /** @deprecated */
   onOpenTraHub?: () => void;
 }
 
-/** Settings → Compliance tab — same unified TRA & EFD page as Operations module. */
+/** Settings → TRA configuration only (reports live under Finance → Reports). */
 export const ComplianceTrustPanel: React.FC<ComplianceTrustPanelProps> = ({
   language,
   businessName,
   tinNumber,
+  onNavigate,
 }) => (
-  <TraEfdPage
+  <TraEfdSetupView
     language={language}
     businessName={businessName}
     tinNumber={tinNumber}
-    initialTab="setup"
+    onOpenTraReports={() => onNavigate?.('reports')}
   />
 );

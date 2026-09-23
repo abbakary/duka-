@@ -42,7 +42,8 @@ import { formatTSh, getTranslation } from '@/utils/translations';
 import { ActionBar } from '@/components/v1/ActionBar';
 import confetti from 'canvas-confetti';
 import { api } from '@/lib/api';
-import { mapCustomer, mapSupplier, filterByBranchId, filterPurchaseOrdersByBranch } from '@/lib/apiSync';
+import { mapCustomer, mapSupplier, filterByActiveBranch, filterPurchaseOrdersByBranch } from '@/lib/apiSync';
+import type { Product, StoreBranch } from '@/types/v1';
 import {
   canSettleCustomerDebt,
   canSettleSupplierPayable,
@@ -66,6 +67,8 @@ interface ReceivablesPayablesViewProps {
   supplierPayments?: SupplierPayment[];
   setSupplierPayments?: React.Dispatch<React.SetStateAction<SupplierPayment[]>>;
   sales?: SaleTransaction[];
+  products?: Product[];
+  branches?: StoreBranch[];
   currentUser?: any;
   onOpenAIChatWithPrompt?: (prompt: string) => void;
   onNavigateToPOS?: () => void;
@@ -115,6 +118,8 @@ export const ReceivablesPayablesView: React.FC<ReceivablesPayablesViewProps> = (
   supplierPayments = [],
   setSupplierPayments,
   sales = [],
+  products = [],
+  branches = [],
   currentUser,
   onOpenAIChatWithPrompt,
   onNavigateToPOS,
@@ -127,16 +132,16 @@ export const ReceivablesPayablesView: React.FC<ReceivablesPayablesViewProps> = (
   const { config, getActive } = useDocumentTemplates();
 
   const branchCustomers = useMemo(
-    () => filterByBranchId(customers, activeBranchId),
-    [customers, activeBranchId],
+    () => filterByActiveBranch(customers, activeBranchId, branches),
+    [customers, activeBranchId, branches],
   );
   const branchSales = useMemo(
-    () => filterByBranchId(sales, activeBranchId),
-    [sales, activeBranchId],
+    () => filterByActiveBranch(sales, activeBranchId, branches),
+    [sales, activeBranchId, branches],
   );
   const branchProductIds = useMemo(
-    () => new Set(branchSales.flatMap(s => s.items.map(i => i.productId))),
-    [branchSales],
+    () => new Set(filterByActiveBranch(products, activeBranchId, branches).map(p => p.id)),
+    [products, activeBranchId, branches],
   );
   const branchPurchaseOrders = useMemo(
     () => filterPurchaseOrdersByBranch(purchaseOrders, activeBranchId, branchProductIds),

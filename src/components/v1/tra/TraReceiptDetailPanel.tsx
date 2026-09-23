@@ -3,6 +3,7 @@ import { ArrowLeft, Printer, ExternalLink, CheckCircle2, XCircle, Clock, FlaskCo
 import type { TraReceipt, TraReceiptStatus } from '@/types/traReceipt';
 import { formatTSh } from '@/utils/translations';
 import { printTraFiscalSlip } from '@/lib/traFiscalSlip';
+import { buildTraSlipMeta } from '@/lib/traFiscalSlipMeta';
 import { TraFiscalSlipPreview } from '@/components/v1/TraFiscalSlipPreview';
 import { useTaxCompliance } from '@/context/TaxComplianceContext';
 import { useTraReceipts } from '@/context/TraReceiptContext';
@@ -54,10 +55,9 @@ export const TraReceiptDetailPanel: React.FC<TraReceiptDetailPanelProps> = ({
     printTraFiscalSlip(
       receipt,
       taxSettings,
-      {
-        serialNumber: efdSettings.deviceId || taxSettings.traEfdSerial,
+      buildTraSlipMeta(efdSettings, taxSettings, {
         datetimeIso: `${receipt.receiptDate}T${receipt.receiptTime}`,
-      },
+      }),
       isSw,
     );
   };
@@ -100,10 +100,9 @@ export const TraReceiptDetailPanel: React.FC<TraReceiptDetailPanelProps> = ({
           <TraFiscalSlipPreview
             receipt={receipt}
             tax={taxSettings}
-            meta={{
-              serialNumber: efdSettings.deviceId || taxSettings.traEfdSerial,
+            meta={buildTraSlipMeta(efdSettings, taxSettings, {
               datetimeIso: `${receipt.receiptDate}T${receipt.receiptTime}`,
-            }}
+            })}
           />
         </div>
         <div className="bg-white rounded-xl border border-[#E1DFDD] p-5 shadow-xs space-y-3">

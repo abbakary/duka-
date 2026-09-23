@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Settings, Receipt, BarChart3, ShieldCheck } from 'lucide-react';
-import type { Language } from '@/types/v1';
+import type { AuthUser, Language } from '@/types/v1';
 import { useTaxCompliance } from '@/context/TaxComplianceContext';
 import { TraTaxConfigurationBlock } from '@/components/v1/tra/TraTaxConfigurationBlock';
 import { TraEfdApiSection } from '@/components/v1/tra/TraEfdApiSection';
@@ -13,6 +13,7 @@ interface TraEfdPageProps {
   language: Language;
   businessName?: string;
   tinNumber?: string;
+  currentUser?: AuthUser | null;
   initialTab?: TraEfdPageTab;
 }
 
@@ -25,6 +26,7 @@ export const TraEfdPage: React.FC<TraEfdPageProps> = ({
   language,
   businessName,
   tinNumber,
+  currentUser,
   initialTab = 'setup',
 }) => {
   const isSw = language === 'sw';
@@ -119,7 +121,7 @@ export const TraEfdPage: React.FC<TraEfdPageProps> = ({
 
       {tab === 'receipts' && <TraReceiptsSection language={language} />}
 
-      {tab === 'reports' && <TraReportsSection language={language} />}
+      {tab === 'reports' && <TraReportsSection language={language} currentUser={currentUser} />}
     </div>
   );
 };

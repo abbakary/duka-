@@ -3,6 +3,7 @@ import type { TraReceipt } from '@/types/traReceipt';
 import type { TaxComplianceSettings } from '@/lib/taxComplianceSettings';
 import { formatTSh } from '@/utils/translations';
 import { traLogoUrl, type TraFiscalSlipMeta } from '@/lib/traFiscalSlip';
+import { formatTzMobilePhone } from '@/lib/formatTzPhone';
 
 interface Props {
   receipt: TraReceipt;
@@ -19,7 +20,8 @@ export const TraFiscalSlipPreview: React.FC<Props> = ({
   className = '',
 }) => {
   const business = receipt.companyName || tax.receiptBusinessName || 'Business';
-  const mobile = meta.mobile || receipt.customerMobile || 'N/A';
+  const businessMobile = formatTzMobilePhone(meta.mobile);
+  const customerMobile = formatTzMobilePhone(receipt.customerMobile);
   const tin = tax.tinNumber || '—';
   const vrn = receipt.vrn || tax.vrnNumber || '—';
   const serial = meta.serialNumber || tax.traEfdSerial || '—';
@@ -35,7 +37,12 @@ export const TraFiscalSlipPreview: React.FC<Props> = ({
       receipt.verificationCode !== '—' &&
       receipt.verificationCode !== 'PENDING!',
   );
-  const failed = receipt.status === 'failed';
+  const failed = receipt.status === 'failed' && !receipt.isDemo;
+  const totalExcl =
+    receipt.totalExclTax > 0 && receipt.totalInclTax > receipt.totalExclTax
+      ? receipt.totalExclTax
+      : Math.max(0, receipt.totalInclTax - receipt.totalVat);
+  const totalIncl = receipt.totalInclTax || totalExcl + receipt.totalVat;
 
   return (
     <div
@@ -50,7 +57,7 @@ export const TraFiscalSlipPreview: React.FC<Props> = ({
 
       <div className="text-center font-extrabold text-[13px] mb-1">{business}</div>
       <div>
-        <div>MOBILE: {mobile}</div>
+        <div>MOBILE: {businessMobile}</div>
         <div>TIN: {tin}</div>
         <div>VRN: {vrn}</div>
         <div>SERIAL NUMBER: {serial}</div>
@@ -62,7 +69,7 @@ export const TraFiscalSlipPreview: React.FC<Props> = ({
       <div>
         <div>CUSTOMER NAME: {receipt.customerName || 'Walk-in'}</div>
         <div>CUSTOMER TIN / ID: {customerTin}</div>
-        <div>MOBILE: {receipt.customerMobile || 'N/A'}</div>
+        <div>MOBILE: {customerMobile}</div>
       </div>
 
       <div className="text-center my-1.5">--------------------------------</div>
@@ -100,7 +107,7 @@ export const TraFiscalSlipPreview: React.FC<Props> = ({
       <div className="space-y-0.5">
         <div className="flex justify-between gap-2">
           <span>Total Excl. TAX:</span>
-          <span>{formatTSh(receipt.totalExclTax)}</span>
+          <span>{formatTSh(totalExcl)}</span>
         </div>
         <div className="flex justify-between gap-2">
           <span>TAX (18%):</span>
@@ -108,7 +115,7 @@ export const TraFiscalSlipPreview: React.FC<Props> = ({
         </div>
         <div className="flex justify-between gap-2 font-extrabold">
           <span>TOTAL INCL. TAX:</span>
-          <span>{formatTSh(receipt.totalInclTax)}</span>
+          <span>{formatTSh(totalIncl)}</span>
         </div>
       </div>
 
@@ -133,6 +140,10 @@ export const TraFiscalSlipPreview: React.FC<Props> = ({
           <strong>TRA ERROR</strong>
           <br />
           {receipt.apiResponse || 'Verification unavailable'}
+        </div>
+      ) : receipt.isDemo || receipt.status === 'demo' ? (
+        <div className="text-center text-[9px] text-[#555] my-1.5 border border-dashed border-[#999] p-1">
+          Demo fiscal receipt — configure live TRA EFD for production verification.
         </div>
       ) : (
         <div className="text-center text-[9px] text-[#666] my-1.5">

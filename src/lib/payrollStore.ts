@@ -8,6 +8,23 @@ export interface StaffPayrollConfig {
   baseSalary?: number;
   dailyFoodAllowance?: number;
   dailyTransportAllowance?: number;
+  /** Monthly housing allowance (statutory gross component). */
+  housingAllowanceMonthly?: number;
+  /** Monthly transport allowance on payslip (not daily stipend). */
+  transportAllowanceMonthly?: number;
+  heslb?: boolean;
+  tin?: string;
+  nssfNumber?: string;
+  nationalId?: string;
+  bankName?: string;
+  bankBranch?: string;
+  bankAccount?: string;
+  contractType?: string;
+  hireDate?: string;
+  department?: string;
+  jobTitle?: string;
+  nssfEnabled?: boolean;
+  payeEnabled?: boolean;
 }
 
 export interface PayrollStoreData {
@@ -24,8 +41,13 @@ const EMPTY: PayrollStoreData = {
   staffConfig: {},
 };
 
-function storageKey(tenantId: string): string {
-  return `dukamkononi_payroll_${tenantId}`;
+function storageKey(tenantId: string, branchId?: string | null): string {
+  const branchPart = branchId && branchId !== 'all' ? branchId : 'hq';
+  return `dukamkononi_payroll_${tenantId}_${branchPart}`;
+}
+
+export function payrollStorageScope(tenantId: string, branchId?: string | null): string {
+  return storageKey(tenantId, branchId);
 }
 
 export function todayDateStr(): string {
@@ -36,9 +58,9 @@ export function currentMonthStr(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
-export function loadPayrollStore(tenantId: string): PayrollStoreData {
+export function loadPayrollStore(tenantId: string, branchId?: string | null): PayrollStoreData {
   try {
-    const raw = localStorage.getItem(storageKey(tenantId));
+    const raw = localStorage.getItem(storageKey(tenantId, branchId));
     if (!raw) return { ...EMPTY, staffConfig: {} };
     const parsed = JSON.parse(raw) as PayrollStoreData;
     return {
@@ -52,8 +74,8 @@ export function loadPayrollStore(tenantId: string): PayrollStoreData {
   }
 }
 
-export function savePayrollStore(tenantId: string, data: PayrollStoreData): void {
-  localStorage.setItem(storageKey(tenantId), JSON.stringify(data));
+export function savePayrollStore(tenantId: string, data: PayrollStoreData, branchId?: string | null): void {
+  localStorage.setItem(storageKey(tenantId, branchId), JSON.stringify(data));
 }
 
 export function monthAllowancesTotal(

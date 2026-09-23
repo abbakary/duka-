@@ -4,7 +4,7 @@ export const RAILWAY_API_BASE =
   'https://dukaplusbackend-production.up.railway.app/api/v1';
 
 export function getApiBaseUrl(): string {
-  // Local Vite DEV: same-origin proxy (vite.config.ts → Railway). Avoids browser CORS.
+  // Local Vite DEV: same-origin proxy (vite.config.ts → Railway by default). Avoids browser CORS.
   // Set VITE_API_FORCE_DIRECT=true to call Railway from the browser during local dev.
   if (import.meta.env.DEV && import.meta.env.VITE_API_FORCE_DIRECT !== 'true') {
     return '/api/v1';
@@ -32,7 +32,12 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
   { label: 'Pharmacy', labelSw: 'Duka la Dawa', email: 'pharmacy@sample.dukaplus.co.tz', role: 'Owner' },
   { label: 'Retail', labelSw: 'Rejareja', email: 'retail@sample.dukaplus.co.tz', role: 'Owner' },
   { label: 'Restaurant', labelSw: 'Mgahawa', email: 'restaurant@sample.dukaplus.co.tz', role: 'Owner' },
-  { label: 'Hardware', labelSw: 'Vifaa', email: 'hardware@sample.dukaplus.co.tz', role: 'Owner' },
+  {
+    label: 'Hardware (50+ demo data)',
+    labelSw: 'Vifaa (data 50+)',
+    email: 'hardware@sample.dukaplus.co.tz',
+    role: 'Owner',
+  },
   { label: 'Electronics', labelSw: 'Elektroniki', email: 'electronics@sample.dukaplus.co.tz', role: 'Owner' },
   { label: 'Supermarket', labelSw: 'Supermarket', email: 'supermarket@sample.dukaplus.co.tz', role: 'Owner' },
   { label: 'Manager', labelSw: 'Meneja', email: 'manager.kariakoo-pharmacy@sample.dukaplus.co.tz', role: 'Manager' },

@@ -11,7 +11,8 @@ import {
   CalendarRange,
   Package,
 } from 'lucide-react';
-import { Language, SaleTransaction, Product, Supplier, PurchaseOrder, AuthUser } from '@/types/v1';
+import { Language, SaleTransaction, Product, Supplier, PurchaseOrder, AuthUser, StoreBranch } from '@/types/v1';
+import { buildReportCompanyInfo } from '@/lib/reportCompanyInfo';
 import { formatTSh, getTranslation } from '@/utils/translations';
 import { PredictiveAnalyticsView } from '@/components/v1/PredictiveAnalyticsView';
 import { printHtmlPage } from '@/lib/documentRenderer';
@@ -37,6 +38,8 @@ import {
   renderInventoryValuationPaper,
   renderPurchaseOrdersPaper,
 } from '@/lib/reportPaperHtml';
+import { TraFiscalReportsHub } from '@/components/v1/tra/TraFiscalReportsHub';
+import { DUKA_REPORTS_HUB_KEY } from '@/components/v1/tra/TraEfdSetupView';
 
 interface ReportsAnalyticsViewProps {
   language: Language;
@@ -47,9 +50,23 @@ interface ReportsAnalyticsViewProps {
   onOpenAIChatWithPrompt?: (prompt: string) => void;
   onNavigateToSuppliers?: () => void;
   currentUser?: AuthUser | null;
+  activeBranchId?: string | null;
+  activeBranchName?: string | null;
+  activeBranchAddress?: string | null;
+  activeBranch?: StoreBranch | null;
 }
 
-type HubTab = 'standard' | 'predictive';
+type HubTab = 'standard' | 'predictive' | 'tra';
+
+function readReportsHubBoot(): HubTab | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  const boot = sessionStorage.getItem(DUKA_REPORTS_HUB_KEY);
+  if (boot === 'tra') {
+    sessionStorage.removeItem(DUKA_REPORTS_HUB_KEY);
+    return 'tra';
+  }
+  return null;
+}
 
 const REPORT_KINDS: Array<{
   id: StandardReportKind;
@@ -80,8 +97,8 @@ const REPORT_KINDS: Array<{
     icon: <Package className="w-4 h-4" />,
     en: 'Inventory valuation',
     sw: 'Thamani ya stoo',
-    hintEn: 'Odoo-style qty × cost value',
-    hintSw: 'Mtindo wa Odoo — wingi × gharama',
+    hintEn: 'Qty × cost value with full product lines',
+    hintSw: 'Wingi × gharama na maelezo ya bidhaa',
   },
   {
     id: 'purchase_orders',
@@ -102,13 +119,17 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
   onOpenAIChatWithPrompt,
   onNavigateToSuppliers,
   currentUser,
+  activeBranchId,
+  activeBranchName,
+  activeBranchAddress,
+  activeBranch,
 }) => {
   const isSw = language === 'sw';
   const t = (key: string) => getTranslation(language, key as never);
   const { settings: taxSettings } = useTaxCompliance();
   const { config } = useDocumentTemplates();
 
-  const [hubTab, setHubTab] = useState<HubTab>('standard');
+  const [hubTab, setHubTab] = useState<HubTab>(() => readReportsHubBoot() ?? 'standard');
   const [reportKind, setReportKind] = useState<StandardReportKind>('sales_detail');
   const [preset, setPreset] = useState<ReportDatePreset>('month');
   const [customFrom, setCustomFrom] = useState(() => periodFromPreset('month').from);
@@ -121,18 +142,15 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
   );
 
   const company: ReportCompanyInfo = useMemo(
-    () => ({
-      businessName: config.branding.companyName || currentUser?.businessName || 'Duka+ Business',
-      ownerName: currentUser?.name,
-      address: config.branding.address || currentUser?.location,
-      phone: config.branding.phone || currentUser?.phone,
-      email: currentUser?.email,
-      tinNumber: config.branding.tinNumber || currentUser?.tinNumber,
-      branch: currentUser?.branch,
-      logoUrl: config.branding.logoUrl || undefined,
-      businessType: currentUser?.businessType,
-    }),
-    [config.branding, currentUser],
+    () =>
+      buildReportCompanyInfo({
+        isSw,
+        currentUser,
+        branding: config.branding,
+        activeBranch: activeBranch ?? null,
+        activeBranchName: activeBranchName || activeBranch?.name,
+      }),
+    [isSw, config.branding, currentUser, activeBranch, activeBranchName],
   );
 
   const filteredSales = useMemo(() => {
@@ -253,7 +271,7 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
     return titles[reportKind];
   };
 
-  /** Print + Download PDF both use the Odoo-style A4 paper (Save as PDF in print dialog). */
+  /** Print + Download PDF both use the A4 paper layout (Save as PDF in print dialog). */
   const handlePrintOrPdf = () => {
     printHtmlPage(reportTitle(), paperHtml, isSw);
   };
@@ -290,10 +308,11 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
             currentUser={currentUser}
             taxSettings={taxSettings}
             isSw={isSw}
+            branchName={activeBranchName}
             detail={
               isSw
-                ? 'Ripoti TRA/VAT · thamani ya stoo · ununuzi (karatasi kama Odoo)'
-                : 'TRA/VAT · inventory valuation · purchases (Odoo-style paper)'
+                ? 'Ripoti TRA/VAT · thamani ya stoo · ununuzi (karatasi A4)'
+                : 'TRA/VAT · inventory valuation · purchases (A4 paper reports)'
             }
           />
         }
@@ -315,11 +334,11 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
         }
       />
 
-      <div className="flex items-center gap-1 p-1 bg-white rounded-xl border border-[#E1DFDD] shadow-xs w-full max-w-md">
+      <div className="flex flex-wrap items-center gap-1 p-1 bg-white rounded-xl border border-[#E1DFDD] shadow-xs w-full max-w-2xl">
         <button
           type="button"
           onClick={() => setHubTab('standard')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer ${
+          className={`flex-1 min-w-[120px] flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer ${
             hubTab === 'standard' ? 'bg-[#0F2347] text-white' : 'text-[#605E5C] hover:bg-[#F3F2F1]'
           }`}
         >
@@ -328,8 +347,18 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
         </button>
         <button
           type="button"
+          onClick={() => setHubTab('tra')}
+          className={`flex-1 min-w-[120px] flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer ${
+            hubTab === 'tra' ? 'bg-[#E65100] text-white' : 'text-[#605E5C] hover:bg-[#F3F2F1]'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          {isSw ? 'TRA / EFD' : 'TRA / EFD'}
+        </button>
+        <button
+          type="button"
           onClick={() => setHubTab('predictive')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer ${
+          className={`flex-1 min-w-[120px] flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer ${
             hubTab === 'predictive' ? 'bg-[#0F2347] text-white' : 'text-[#605E5C] hover:bg-[#F3F2F1]'
           }`}
         >
@@ -338,7 +367,15 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
         </button>
       </div>
 
-      {hubTab === 'predictive' ? (
+      {hubTab === 'tra' ? (
+        <TraFiscalReportsHub
+          language={language}
+          currentUser={currentUser}
+          activeBranchId={activeBranchId}
+          activeBranchName={activeBranchName}
+          activeBranch={activeBranch}
+        />
+      ) : hubTab === 'predictive' ? (
         <PredictiveAnalyticsView
           language={language}
           products={products}
@@ -349,7 +386,7 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
           onNavigateToSuppliers={onNavigateToSuppliers}
         />
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)] gap-4 w-full max-w-full">
           <aside className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs p-3 space-y-1 h-fit xl:sticky xl:top-4">
             <div className="text-[10px] font-bold uppercase tracking-wider text-[#8A8886] px-2 py-1">
               {isSw ? 'Aina ya ripoti' : 'Report type'}
@@ -374,7 +411,7 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
             ))}
           </aside>
 
-          <div className="space-y-4">
+          <div className="space-y-4 min-w-0 max-w-full">
             <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs p-3.5 space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <CalendarRange className="w-4 h-4 text-[#6264A7]" />
@@ -471,7 +508,7 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
                     type="button"
                     onClick={handlePrintOrPdf}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0078D4] text-white text-xs font-bold hover:brightness-110 cursor-pointer"
-                    title={isSw ? 'Fungua karatasi ya Odoo — chagua Hifadhi kama PDF' : 'Opens Odoo-style paper — choose Save as PDF'}
+                    title={isSw ? 'Fungua karatasi A4 — chagua Hifadhi kama PDF' : 'Opens A4 report — choose Save as PDF'}
                   >
                     <Download className="w-3.5 h-3.5" />
                     {isSw ? 'Pakua PDF' : 'Download PDF'}
@@ -480,7 +517,7 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 min-w-0">
               {reportKind === 'inventory_valuation' ? (
                 <>
                   <Kpi label={isSw ? 'SKU' : 'SKUs'} value={String(inventory.skuCount)} />
@@ -525,7 +562,7 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
               )}
             </div>
 
-            <div className="rounded-2xl border border-[#D0D4DC] bg-[linear-gradient(160deg,#E8EAEE_0%,#F4F5F7_45%,#DEE2E8_100%)] p-3 sm:p-5 shadow-inner">
+            <div className="rounded-2xl border border-[#D0D4DC] bg-[linear-gradient(160deg,#E8EAEE_0%,#F4F5F7_45%,#DEE2E8_100%)] p-3 sm:p-5 shadow-inner min-w-0 max-w-full">
               {/* Preview header */}
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3 px-1">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#605E5C]">
@@ -556,20 +593,23 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
 
               {/* Paper container — horizontally scrollable on small screens */}
               <div
-                className="overflow-x-auto overflow-y-auto rounded-sm"
+                className="w-full max-w-full overflow-x-auto overflow-y-auto rounded-sm border border-[#E5E7EB]/80 bg-[#ECEFF3]"
                 style={{
                   maxHeight: 'min(78vh, 920px)',
                   WebkitOverflowScrolling: 'touch',
-                  // Scale down slightly on very narrow viewports so columns are readable
-                  overflowX: 'auto',
                 }}
               >
-                {/* Inner wrapper lets the A4 paper maintain its true width but the outer container scrolls */}
                 <div
-                  style={{ minWidth: 0, width: '100%' }}
+                  className="py-3 px-2 sm:px-4 inline-block min-w-full"
+                  style={{ width: 'max-content', minWidth: '100%' }}
                   dangerouslySetInnerHTML={{ __html: paperHtml }}
                 />
               </div>
+              <p className="text-[10px] text-[#8A8886] mt-2 px-1">
+                {isSw
+                  ? 'Telezesha kushoto/kulia kuona safu zote kwenye skrini ndogo.'
+                  : 'Swipe or scroll horizontally to see all columns on smaller screens.'}
+              </p>
             </div>
           </div>
         </div>
@@ -599,7 +639,7 @@ function Kpi({
     <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs p-3.5 relative overflow-hidden">
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${bar}`} />
       <div className="text-[10px] font-semibold text-[#605E5C] uppercase tracking-wide pl-2">{label}</div>
-      <div className="text-sm sm:text-base font-extrabold text-[#323130] mt-1 pl-2 tabular-nums leading-snug break-words">
+      <div className="text-xs sm:text-sm font-extrabold text-[#323130] mt-1 pl-2 tabular-nums leading-snug truncate" title={value}>
         {value}
       </div>
     </div>

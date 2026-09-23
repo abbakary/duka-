@@ -62,7 +62,8 @@ import {
 import { formatTSh, getTranslation } from '@/utils/translations';
 import { buildLocalCrossMatrixAnalysis } from '@/lib/analyticsCompute';
 import { api } from '@/lib/api';
-import { filterByBranchId } from '@/lib/apiSync';
+import { filterByActiveBranch } from '@/lib/apiSync';
+import type { StoreBranch } from '@/types/v1';
 import { printHtmlPage } from '@/lib/documentRenderer';
 import { matrixReportHtml } from '@/lib/documentDataMappers';
 import { TerritoryLeafletMap, type TerritoryMapPoint } from '@/components/v1/TerritoryLeafletMap';
@@ -93,6 +94,7 @@ interface ProductCustomerLocationAnalyticsViewProps {
   onOpenAIChatWithPrompt?: (prompt: string) => void;
   onNavigateToPOSWithItem?: (product: Product, customer?: Customer) => void;
   activeBranchId?: string | null;
+  branches?: StoreBranch[];
 }
 
 export const ProductCustomerLocationAnalyticsView: React.FC<ProductCustomerLocationAnalyticsViewProps> = ({
@@ -103,21 +105,22 @@ export const ProductCustomerLocationAnalyticsView: React.FC<ProductCustomerLocat
   onOpenAIChatWithPrompt,
   onNavigateToPOSWithItem,
   activeBranchId,
+  branches = [],
 }) => {
   const isSw = language === 'sw';
   const t = (key: any) => getTranslation(language, key);
 
   const branchCustomers = useMemo(
-    () => filterByBranchId(customers, activeBranchId),
-    [customers, activeBranchId],
+    () => filterByActiveBranch(customers, activeBranchId, branches),
+    [customers, activeBranchId, branches],
   );
   const branchProducts = useMemo(
-    () => filterByBranchId(products, activeBranchId),
-    [products, activeBranchId],
+    () => filterByActiveBranch(products, activeBranchId, branches),
+    [products, activeBranchId, branches],
   );
   const branchSales = useMemo(
-    () => filterByBranchId(sales, activeBranchId),
-    [sales, activeBranchId],
+    () => filterByActiveBranch(sales, activeBranchId, branches),
+    [sales, activeBranchId, branches],
   );
 
   const [geoSummary, setGeoSummary] = useState<Record<string, unknown> | null>(null);

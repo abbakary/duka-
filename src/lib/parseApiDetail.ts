@@ -15,6 +15,9 @@ export function parseApiDetail(detail: unknown): string {
       .join('; ');
   }
   if (detail && typeof detail === 'object') {
+    const rec = detail as { message?: string; code?: string; detail?: string };
+    if (typeof rec.message === 'string' && rec.message.trim()) return rec.message.trim();
+    if (typeof rec.detail === 'string' && rec.detail.trim()) return rec.detail.trim();
     return JSON.stringify(detail);
   }
   return 'Request failed';

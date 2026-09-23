@@ -6,6 +6,12 @@ import { loadEfdApiSettings, saveEfdApiSettings } from '@/lib/efdSettingsStore';
 import { issueTraReceipt, testEfdConnection } from '@/lib/efdApi';
 import { useTaxCompliance } from '@/context/TaxComplianceContext';
 import type { TraCustomerIdType } from '@/types/traReceipt';
+import { api } from '@/lib/api';
+import { mapApiTraConfigToSettings, settingsToTraConfigApi } from '@/lib/traEfdConfigMap';
+import {
+  mapFiscalRecordToTraReceipt,
+  mergeTraReceiptLists,
+} from '@/lib/traReceiptApiMap';
 
 interface IssueFromSaleOptions {
   customerMobile?: string;
@@ -16,11 +22,13 @@ interface IssueFromSaleOptions {
 interface TraReceiptContextValue {
   receipts: TraReceipt[];
   efdSettings: EfdApiSettings;
+  configLoading: boolean;
   updateEfdSettings: (patch: Partial<EfdApiSettings>) => void;
-  saveEfdSettings: (next: EfdApiSettings) => void;
+  saveEfdSettings: (next: EfdApiSettings) => Promise<void>;
   testConnection: () => Promise<{ ok: boolean; message: string }>;
   issueFromSale: (sale: SaleTransaction, companyName: string, opts?: IssueFromSaleOptions) => Promise<TraReceipt | null>;
-  refreshReceipts: () => void;
+  refreshReceipts: () => Promise<void>;
+  receiptsLoading: boolean;
   selectedReceiptId: string | null;
   setSelectedReceiptId: (id: string | null) => void;
 }
@@ -36,6 +44,8 @@ export const TraReceiptProvider: React.FC<TraReceiptProviderProps> = ({ tenantId
   const { settings: taxSettings } = useTaxCompliance();
   const [receipts, setReceipts] = useState<TraReceipt[]>(() => loadTraReceipts(tenantId));
   const [efdSettings, setEfdSettings] = useState<EfdApiSettings>(() => loadEfdApiSettings(tenantId));
+  const [configLoading, setConfigLoading] = useState(false);
+  const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,9 +54,43 @@ export const TraReceiptProvider: React.FC<TraReceiptProviderProps> = ({ tenantId
     setSelectedReceiptId(null);
   }, [tenantId]);
 
-  const refreshReceipts = useCallback(() => {
-    setReceipts(loadTraReceipts(tenantId));
+  useEffect(() => {
+    if (!tenantId || !api.hasValidSession()) return;
+    setConfigLoading(true);
+    api
+      .getTraEfdConfig()
+      .then(raw => {
+        const mapped = mapApiTraConfigToSettings(raw);
+        setEfdSettings(mapped);
+        saveEfdApiSettings(tenantId, mapped);
+      })
+      .catch(() => undefined)
+      .finally(() => setConfigLoading(false));
   }, [tenantId]);
+
+  const refreshReceipts = useCallback(async () => {
+    const local = loadTraReceipts(tenantId);
+    if (!tenantId || !api.hasValidSession()) {
+      setReceipts(local);
+      return;
+    }
+    setReceiptsLoading(true);
+    try {
+      const rows = await api.listTraFiscalReceipts(200);
+      const fromApi = rows.map(r => mapFiscalRecordToTraReceipt(r));
+      const merged = mergeTraReceiptLists(local, fromApi);
+      saveTraReceipts(tenantId, merged);
+      setReceipts(merged);
+    } catch {
+      setReceipts(local);
+    } finally {
+      setReceiptsLoading(false);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    void refreshReceipts();
+  }, [refreshReceipts]);
 
   const updateEfdSettings = useCallback(
     (patch: Partial<EfdApiSettings>) => {
@@ -60,7 +104,16 @@ export const TraReceiptProvider: React.FC<TraReceiptProviderProps> = ({ tenantId
   );
 
   const saveEfdSettingsFn = useCallback(
-    (next: EfdApiSettings) => {
+    async (next: EfdApiSettings) => {
+      const includeSecret = Boolean(next.clientSecret.trim());
+      if (tenantId && api.hasValidSession()) {
+        const saved = await api.updateTraEfdConfig(settingsToTraConfigApi(next, includeSecret));
+        const mapped = mapApiTraConfigToSettings(saved);
+        if (includeSecret) mapped.clientSecret = '';
+        saveEfdApiSettings(tenantId, mapped);
+        setEfdSettings(mapped);
+        return;
+      }
       saveEfdApiSettings(tenantId, next);
       setEfdSettings(next);
     },
@@ -68,13 +121,24 @@ export const TraReceiptProvider: React.FC<TraReceiptProviderProps> = ({ tenantId
   );
 
   const testConnection = useCallback(async () => {
+    if (tenantId && api.hasValidSession()) {
+      await api.updateTraEfdConfig(settingsToTraConfigApi(efdSettings, true));
+    }
     const result = await testEfdConnection(efdSettings);
-    const next = {
+    let next = {
       ...efdSettings,
       lastTestAt: new Date().toISOString(),
       lastTestOk: result.ok,
       lastTestMessage: result.message,
     };
+    if (tenantId && api.hasValidSession() && result.ok) {
+      try {
+        const raw = await api.getTraEfdConfig();
+        next = { ...mapApiTraConfigToSettings(raw), ...next, clientSecret: '' };
+      } catch {
+        /* keep local test flags */
+      }
+    }
     saveEfdApiSettings(tenantId, next);
     setEfdSettings(next);
     return result;
@@ -104,17 +168,21 @@ export const TraReceiptProvider: React.FC<TraReceiptProviderProps> = ({ tenantId
     () => ({
       receipts,
       efdSettings,
+      configLoading,
       updateEfdSettings,
       saveEfdSettings: saveEfdSettingsFn,
       testConnection,
       issueFromSale,
       refreshReceipts,
+      receiptsLoading,
       selectedReceiptId,
       setSelectedReceiptId,
     }),
     [
       receipts,
       efdSettings,
+      configLoading,
+      receiptsLoading,
       updateEfdSettings,
       saveEfdSettingsFn,
       testConnection,

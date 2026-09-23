@@ -23,9 +23,32 @@ function roleFlags(user: AuthUser | null | undefined) {
   const isManager = isOwner || staffRole === 'Manager';
   const isCashier = staffRole === 'Cashier';
   const isAccountant = staffRole === 'Accountant';
+  const isHr = staffRole === 'HR';
   const isStorekeeper = staffRole === 'Storekeeper';
   const perms = resolveUserPermissions(user);
-  return { isOwner, isManager, isCashier, isAccountant, isStorekeeper, perms };
+  return { isOwner, isManager, isCashier, isAccountant, isHr, isStorekeeper, perms };
+}
+
+/** Owner, Manager, HR — employee records, contracts, payslip issuance */
+export function canManageHrPeople(user: AuthUser | null | undefined): boolean {
+  const { isOwner, isManager, isHr } = roleFlags(user);
+  return isOwner || isManager || isHr;
+}
+
+/** Authorize payslips with digital signature */
+export function canSignPayslips(user: AuthUser | null | undefined): boolean {
+  return canManageHrPeople(user);
+}
+
+/** Payroll run confirm + staff registration (not accounting post) */
+export function canRunPayrollOperations(user: AuthUser | null | undefined): boolean {
+  return canManagePayroll(user) || roleFlags(user).isHr;
+}
+
+/** Post payroll journals — finance role */
+export function canPostPayrollAccounting(user: AuthUser | null | undefined): boolean {
+  const { isOwner, isManager, isAccountant } = roleFlags(user);
+  return isOwner || isManager || isAccountant;
 }
 
 export function canSeeReceivables(user: AuthUser | null | undefined): boolean {
@@ -55,8 +78,8 @@ export function canManageExpenses(user: AuthUser | null | undefined): boolean {
 
 /** Owner & Manager — process monthly payroll, approve advances, configure allowance rates */
 export function canManagePayroll(user: AuthUser | null | undefined): boolean {
-  const { isOwner, isManager } = roleFlags(user);
-  return isOwner || isManager;
+  const { isOwner, isManager, isHr } = roleFlags(user);
+  return isOwner || isManager || isHr;
 }
 
 export function canConfigureAllowances(user: AuthUser | null | undefined): boolean {
@@ -80,7 +103,7 @@ export function canSwitchStaffWorkstation(user: AuthUser | null | undefined): bo
 
 /** Owner & Manager — RBAC matrix, staff registration, permission edits */
 export function canManageStaffRBAC(user: AuthUser | null | undefined): boolean {
-  return canSwitchStaffWorkstation(user);
+  return canManageHrPeople(user);
 }
 
 /** Staff self-service: claim own daily posho (cashier, pharmacist, etc.) */
@@ -137,7 +160,7 @@ export function canAccessVendorTab(
     staff: canManageStaffRBAC,
     team: canManageStaffRBAC,
     'staff-site': canManageStaffRBAC,
-    'module-people': () => canManageStaffRBAC(user) || canViewPayrollHub(user),
+    'module-people': () => canManageHrPeople(user) || canViewPayrollHub(user),
     inventory: () => {
       const { isOwner, isManager, perms } = roleFlags(user);
       return (
@@ -206,6 +229,7 @@ export function expensesInitialTab(activeTab: string): 'expenses' | 'allowances'
 export type DashboardPersona =
   | 'owner'
   | 'manager'
+  | 'hr'
   | 'cashier'
   | 'accountant'
   | 'storekeeper'
@@ -215,6 +239,7 @@ export function getDashboardPersona(user: AuthUser | null | undefined): Dashboar
   if (!user) return 'owner';
   if (user.role === 'vendor_owner' || user.staffRole === 'Owner') return 'owner';
   if (user.staffRole === 'Manager') return 'manager';
+  if (user.staffRole === 'HR') return 'hr';
   if (user.staffRole === 'Accountant') return 'accountant';
   if (user.staffRole === 'Storekeeper') return 'storekeeper';
   if (user.staffRole === 'Pharmacist') return 'pharmacist';

@@ -2,6 +2,7 @@ import traLogoAsset from '@/assets/tralogo.png';
 import type { TraReceipt } from '@/types/traReceipt';
 import type { TaxComplianceSettings } from '@/lib/taxComplianceSettings';
 import { formatTSh } from '@/utils/translations';
+import { formatTzMobilePhone } from '@/lib/formatTzPhone';
 import { printHtmlPage } from '@/lib/documentRenderer';
 
 export function traLogoUrl(): string {
@@ -40,7 +41,8 @@ export function buildTraFiscalSlipHtml(
 ): string {
   const logo = traLogoUrl();
   const business = receipt.companyName || tax.receiptBusinessName || 'Business';
-  const mobile = meta.mobile || receipt.customerMobile || 'N/A';
+  const businessMobile = formatTzMobilePhone(meta.mobile);
+  const customerMobile = formatTzMobilePhone(receipt.customerMobile);
   const tin = tax.tinNumber || '—';
   const vrn = receipt.vrn || tax.vrnNumber || '—';
   const serial = meta.serialNumber || tax.traEfdSerial || '—';
@@ -54,7 +56,12 @@ export function buildTraFiscalSlipHtml(
     `${receipt.receiptDate}T${receipt.receiptTime}`;
   const hasQr = Boolean(receipt.verificationQrDataUrl);
   const hasCode = Boolean(receipt.verificationCode && receipt.verificationCode !== '—' && receipt.verificationCode !== 'PENDING!');
-  const failed = receipt.status === 'failed';
+  const failed = receipt.status === 'failed' && !receipt.isDemo;
+  const totalExcl =
+    receipt.totalExclTax > 0 && receipt.totalInclTax > receipt.totalExclTax
+      ? receipt.totalExclTax
+      : Math.max(0, receipt.totalInclTax - receipt.totalVat);
+  const totalIncl = receipt.totalInclTax || totalExcl + receipt.totalVat;
 
   const itemRows = receipt.items
     .map(
@@ -78,7 +85,7 @@ export function buildTraFiscalSlipHtml(
 
   <div style="text-align:center;font-weight:800;font-size:13px;margin-bottom:4px">${esc(business)}</div>
   <div style="text-align:left">
-    <div>MOBILE: ${esc(mobile)}</div>
+    <div>MOBILE: ${esc(businessMobile)}</div>
     <div>TIN: ${esc(tin)}</div>
     <div>VRN: ${esc(vrn)}</div>
     <div>SERIAL NUMBER: ${esc(serial)}</div>
@@ -90,7 +97,7 @@ export function buildTraFiscalSlipHtml(
   <div style="text-align:left">
     <div>CUSTOMER NAME: ${esc(receipt.customerName || 'Walk-in')}</div>
     <div>CUSTOMER TIN / ID: ${esc(customerTin)}</div>
-    <div>MOBILE: ${esc(receipt.customerMobile || 'N/A')}</div>
+    <div>MOBILE: ${esc(customerMobile)}</div>
   </div>
 
   <div style="text-align:center;margin:6px 0">${dash()}</div>
@@ -118,9 +125,9 @@ export function buildTraFiscalSlipHtml(
   <div style="text-align:center;margin:6px 0">${dash()}</div>
 
   <div style="text-align:left">
-    <div style="display:flex;justify-content:space-between"><span>Total Excl. TAX:</span><span>${esc(formatTSh(receipt.totalExclTax))}</span></div>
+    <div style="display:flex;justify-content:space-between"><span>Total Excl. TAX:</span><span>${esc(formatTSh(totalExcl))}</span></div>
     <div style="display:flex;justify-content:space-between"><span>TAX (18%):</span><span>${esc(formatTSh(receipt.totalVat))}</span></div>
-    <div style="display:flex;justify-content:space-between;font-weight:800"><span>TOTAL INCL. TAX:</span><span>${esc(formatTSh(receipt.totalInclTax))}</span></div>
+    <div style="display:flex;justify-content:space-between;font-weight:800"><span>TOTAL INCL. TAX:</span><span>${esc(formatTSh(totalIncl))}</span></div>
   </div>
 
   <div style="text-align:center;margin:6px 0">${dash()}</div>
@@ -140,9 +147,13 @@ export function buildTraFiscalSlipHtml(
         ? `<div style="border:1px solid #c00;color:#a00;padding:6px;font-size:9px;text-align:left;margin:6px 0;word-break:break-word">
              <strong>TRA ERROR</strong><br/>${esc(receipt.apiResponse || 'Verification unavailable')}
            </div>`
-        : `<div style="text-align:center;font-size:9px;color:#666;margin:6px 0">
-             QR appears when TRA EFD returns a verification link.
-           </div>`
+        : receipt.isDemo || receipt.status === 'demo'
+          ? `<div style="text-align:center;font-size:9px;color:#555;margin:6px 0;border:1px dashed #999;padding:4px">
+               Demo fiscal receipt — configure live TRA EFD for production verification.
+             </div>`
+          : `<div style="text-align:center;font-size:9px;color:#666;margin:6px 0">
+               QR appears when TRA EFD returns a verification link.
+             </div>`
   }
 
   ${

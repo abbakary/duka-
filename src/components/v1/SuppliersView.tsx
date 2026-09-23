@@ -59,7 +59,7 @@ import {
 import confetti from 'canvas-confetti';
 import { api } from '@/lib/api';
 import { ModalPortal } from '@/components/ui/ModalPortal';
-import { mapSupplier, mapPurchaseOrder, mapEvent, optionalApiDate, supplierToApiPayload, eventToApiPayload, filterByBranchId, filterPurchaseOrdersByBranch } from '@/lib/apiSync';
+import { mapSupplier, mapPurchaseOrder, mapEvent, optionalApiDate, supplierToApiPayload, eventToApiPayload, filterByActiveBranch, filterPurchaseOrdersByBranch } from '@/lib/apiSync';
 import { exportProcurementReport } from '@/utils/reportGenerator';
 import {
   PURCHASE_TAX_OPTIONS,
@@ -97,6 +97,7 @@ interface SuppliersViewProps {
   businessType?: BusinessType;
   currentUser?: AuthUser | null;
   activeBranchId?: string | null;
+  branches?: import('@/types/v1').StoreBranch[];
 }
 
 function buildCustomItemDefaults(businessType: BusinessType, lang: 'sw' | 'en') {
@@ -136,10 +137,11 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   businessType = 'retail',
   currentUser,
   activeBranchId,
+  branches = [],
 }) => {
   const branchProducts = useMemo(
-    () => filterByBranchId(products, activeBranchId),
-    [products, activeBranchId],
+    () => filterByActiveBranch(products, activeBranchId, branches),
+    [products, activeBranchId, branches],
   );
   const branchProductIds = useMemo(
     () => new Set(branchProducts.map(p => p.id)),
@@ -975,16 +977,16 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
           {/* Orders Table */}
           <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs overflow-hidden">
-            <div>
-              <table className="w-full text-left text-[10px] sm:text-xs" style={{ tableLayout: 'fixed' }}>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-xs sm:text-sm">
                 <colgroup>
-                  <col style={{ width: '18%' }} />
-                  <col style={{ width: '20%' }} />
-                  <col className="hidden md:table-column" style={{ width: '18%' }} />
-                  <col className="hidden sm:table-column" style={{ width: '14%' }} />
-                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col className="hidden md:table-column" style={{ width: '16%' }} />
+                  <col className="hidden sm:table-column" style={{ width: '12%' }} />
                   <col style={{ width: '12%' }} />
-                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '17%' }} />
                 </colgroup>
                 <thead className="bg-[#F8F8F8] border-b border-[#EDEBE9] text-[#605E5C] font-bold uppercase tracking-wider">
                   <tr>
@@ -1049,8 +1051,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                             </div>
                           </td>
 
-                          <td className="py-2 px-2">
-                            <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                          <td className="py-2.5 px-2 align-middle whitespace-nowrap">
+                            <span className={`inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap ${
                               isReceived
                                 ? 'bg-[#107C10]/10 text-[#107C10] border border-[#107C10]/30'
                                 : isPending
@@ -1061,39 +1063,42 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                             </span>
                           </td>
 
-                          <td className="py-2 px-2 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {/* 1-CLICK RECEIVE & STOCK-IN BUTTON */}
+                          <td className="py-2.5 px-2 align-middle">
+                            <div className="flex flex-col items-stretch sm:items-end gap-1.5 max-w-full">
                               {isPending && (
-                                <>
-                                <button
-                                  id={`btn-receive-po-${po.id}`}
-                                  onClick={() => handleExecuteReceivePO(po)}
-                                  className="px-3 py-1.5 rounded-lg bg-[#107C10] hover:bg-[#0E6A0E] text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-                                  title="1-Click Automatic Stock-In & Inventory Update"
-                                >
-                                  <PackagePlus className="w-3.5 h-3.5" />
-                                  <span>Receive & Stock In</span>
-                                </button>
-                                <button
-                                  onClick={() => handleCancelPO(po)}
-                                  className="px-3 py-1.5 rounded-lg bg-white hover:bg-rose-50 text-rose-700 font-bold text-xs border border-rose-200 transition-all cursor-pointer"
-                                  title="Reject order — no stock added"
-                                >
-                                  Reject
-                                </button>
-                                </>
+                                <div className="flex flex-wrap justify-end gap-1">
+                                  <button
+                                    id={`btn-receive-po-${po.id}`}
+                                    type="button"
+                                    onClick={() => handleExecuteReceivePO(po)}
+                                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#107C10] hover:bg-[#0E6A0E] text-white font-bold text-[11px] sm:text-xs whitespace-nowrap shadow-xs transition-all active:scale-[0.98] cursor-pointer"
+                                    title={isSw ? 'Pokea na ingiza stoo' : '1-Click receive & stock-in'}
+                                  >
+                                    <PackagePlus className="w-3.5 h-3.5 shrink-0" />
+                                    <span>{isSw ? 'Pokea stoo' : 'Receive'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCancelPO(po)}
+                                    className="inline-flex items-center justify-center px-2.5 py-1.5 rounded-lg bg-white hover:bg-rose-50 text-rose-700 font-bold text-[11px] sm:text-xs border border-rose-200 whitespace-nowrap transition-all cursor-pointer"
+                                    title={isSw ? 'Kataa — hakuna stoo' : 'Reject — no stock added'}
+                                  >
+                                    {isSw ? 'Kataa' : 'Reject'}
+                                  </button>
+                                </div>
                               )}
 
                               <button
+                                type="button"
                                 onClick={() => {
                                   setSelectedPO(po);
                                   setIsViewGRNModalOpen(true);
                                 }}
-                                className="px-2.5 py-1.5 rounded-lg bg-[#F3F2F1] hover:bg-[#EDEBE9] text-[#323130] font-semibold text-xs transition-colors cursor-pointer"
-                                title="View Goods Received Note & Invoice"
+                                className="inline-flex items-center justify-center gap-1 self-end px-2.5 py-1.5 rounded-lg bg-[#F3F2F1] hover:bg-[#EDEBE9] text-[#323130] font-semibold text-[11px] sm:text-xs transition-colors cursor-pointer"
+                                title={isSw ? 'Angalia GRN / ankara' : 'View GRN & invoice'}
                               >
-                                <FileText className="w-3.5 h-3.5 text-[#6264A7]" />
+                                <FileText className="w-3.5 h-3.5 text-[#6264A7] shrink-0" />
+                                <span className="hidden xl:inline">{isSw ? 'GRN' : 'GRN'}</span>
                               </button>
                             </div>
                           </td>

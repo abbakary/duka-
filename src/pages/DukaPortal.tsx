@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from 'react';
 import { 
   Customer, 
   Language, 
@@ -97,7 +97,7 @@ import {
 import { TaxComplianceProvider } from '@/context/TaxComplianceContext';
 import { TraReceiptProvider } from '@/context/TraReceiptContext';
 import { DocumentTemplateProvider } from '@/context/DocumentTemplateContext';
-import { TraEfdHubView } from '@/components/v1/TraEfdHubView';
+import { AccountingHubView } from '@/components/v1/AccountingHubView';
 import { TenantThemeProvider } from '@/context/TenantThemeContext';
 import { AIChatbotDrawer } from '@/components/v1/AIChatbotDrawer';
 import { WorkplaceView } from '@/components/v1/WorkplaceView';
@@ -105,7 +105,15 @@ import confetti from 'canvas-confetti';
 import { api } from '@/lib/api';
 import { useSaasPlans } from '@/context/SaasPlansContext';
 import { mapApiUserToAuthUser, tryRestoreSession, persistAuthUser } from '@/lib/authBridge';
-import { syncTenantFromApi, syncAdminFromApi, saleToApiPayload, fetchDashboardStats, fetchProductsFromApi, fetchCustomersFromApi, mergeCustomersFromApi, mapSupplier, scopeSnapshotByBranch, resolveDefaultBranchId, filterByBranchId, type DashboardStats, type ApiSyncResult } from '@/lib/apiSync';
+import {
+  canSwitchTenantBranch,
+  loadPersistedActiveBranchId,
+  savePersistedActiveBranchId,
+  clearPersistedActiveBranchId,
+} from '@/lib/branchSession';
+import { syncTenantFromApi, syncAdminFromApi, saleToApiPayload, fetchDashboardStats, fetchProductsFromApi, fetchCustomersFromApi, mergeCustomersFromApi, mapSupplier, scopeSnapshotByBranch, resolveDefaultBranchId, filterByActiveBranch, filterStaffByBranch, filterPurchaseOrdersByBranch, type DashboardStats, type ApiSyncResult } from '@/lib/apiSync';
+import { isSampleDemoEmail } from '@/lib/demoMediaUrls';
+import { applyClientDemoMedia, ensureDemoRichSeed, ensureLocalHrDemoSeed } from '@/lib/ensureDemoRichSeed';
 import { enforceSaleDueDate } from '@/lib/dueDate';
 import {
   applyPurchaseOrderToProducts,
@@ -184,6 +192,9 @@ export default function DukaPortal() {
   const { settings: billingSettings } = usePlatformBilling();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [activeTab, setActiveTab] = useState<string>('landing');
+  const [staffPeopleSection, setStaffPeopleSection] = useState<
+    'dashboard' | 'directory' | 'recruitment' | 'timeoff' | 'reporting' | 'payroll' | 'compensation' | undefined
+  >(undefined);
   const [language, setLanguage] = useState<Language>('sw'); // Default Swahili for Tanzania
   const [userRole, setUserRole] = useState<UserRole>('vendor_owner');
   const [businessType, setBusinessType] = useState<BusinessType>('retail');
@@ -232,7 +243,9 @@ export default function DukaPortal() {
   const [expenses, setExpenses] = useState<ExpenseItem[]>(EMPTY_EXPENSES);
   const [branches, setBranches] = useState<StoreBranch[]>(EMPTY_BRANCHES);
   const [transfers, setTransfers] = useState<InterBranchTransfer[]>(EMPTY_TRANSFERS);
-  const [activeBranchId, setActiveBranchId] = useState<string>('all');
+  const [activeBranchId, setActiveBranchId] = useState<string>('');
+  const [branchSwitching, setBranchSwitching] = useState(false);
+  const [branchWorkspaceKey, setBranchWorkspaceKey] = useState(0);
   const [posPreloadCart, setPosPreloadCart] = useState<CartItem[] | null>(null);
   const [posPreloadCustomer, setPosPreloadCustomer] = useState<{ id?: string; name?: string } | null>(null);
   const [posResumeSaleId, setPosResumeSaleId] = useState<string | null>(null);
@@ -248,21 +261,37 @@ export default function DukaPortal() {
   const tenantStorageId = currentUser?.businessId || currentUser?.id || 'local';
   const isSw = language === 'sw';
 
+  useEffect(() => {
+    if (activeTab !== 'staff' && activeTab !== 'team' && activeTab !== 'staff-site') {
+      setStaffPeopleSection(undefined);
+    }
+  }, [activeTab]);
+
   const initBranchContextFromUser = (user: AuthUser) => {
+    const tid = user.businessId || user.id;
     if (user.isBranchScoped && user.branchId) {
       setActiveBranchId(user.branchId);
-    } else if (user.branchId) {
+      return;
+    }
+    if (canSwitchTenantBranch(user)) {
+      const persisted = loadPersistedActiveBranchId(tid);
+      if (persisted) {
+        setActiveBranchId(persisted);
+        return;
+      }
+    }
+    if (user.branchId) {
       setActiveBranchId(user.branchId);
     }
   };
 
-  /** Branch filter sent to API — every workspace sees exactly one branch. */
+  /** Active branch context (Odoo-style): one branch at a time, fully isolated. */
   const resolveApiBranchId = (): string | null => {
     if (!currentUser) return null;
     if (currentUser.isBranchScoped && currentUser.branchId) {
       return currentUser.branchId;
     }
-    if (activeBranchId && activeBranchId !== 'all') {
+    if (activeBranchId) {
       return activeBranchId;
     }
     if (currentUser.branchId) {
@@ -271,52 +300,67 @@ export default function DukaPortal() {
     return resolveDefaultBranchId(branches);
   };
 
-  const applyTenantSnapshot = (data: ApiSyncResult & { dashboardStats?: DashboardStats | null }) => {
-    const branchId = resolveApiBranchId();
+  const applyTenantSnapshot = (
+    data: ApiSyncResult & { dashboardStats?: DashboardStats | null },
+    forBranchId?: string | null,
+  ) => {
+    const branchId = forBranchId ?? resolveApiBranchId();
     const scoped = scopeSnapshotByBranch(data, branchId);
     const branchScoped = Boolean(currentUser?.isBranchScoped && currentUser.branchId);
+    const sampleDemo = isSampleDemoEmail(currentUser?.email);
+    const demoMedia = sampleDemo
+      ? applyClientDemoMedia(scoped.products, scoped.staff, scoped.businessType)
+      : null;
+    const productsForState = demoMedia?.products ?? scoped.products;
+    const staffForState = demoMedia?.staff ?? scoped.staff;
+    if (sampleDemo) ensureLocalHrDemoSeed(tenantStorageId, branchId, staffForState);
     setBusinessType(scoped.businessType);
     setBusinessName(scoped.businessName);
     if (scoped.plan) setCurrentPlanTier(scoped.plan);
     if (scoped.subscriptionExpiry) setSubscriptionExpiry(scoped.subscriptionExpiry);
     // Keep local photos when API omits image_url (common for large data URLs)
-    setProducts(prev =>
-      scoped.products.map(p => {
+    setProducts(prev => {
+      const merged = productsForState.map(p => {
         const prior = prev.find(x => x.id === p.id);
         return { ...p, imageUrl: p.imageUrl || prior?.imageUrl };
-      }),
-    );
-    void import('@/lib/productImageCache').then(({ mergeProductImages }) =>
-      mergeProductImages(tenantStorageId, scoped.products, []).then(hydrated => {
-        setProducts(prev =>
-          hydrated.map(p => {
-            const prior = prev.find(x => x.id === p.id);
-            return { ...p, imageUrl: p.imageUrl || prior?.imageUrl };
-          }),
-        );
-      }),
-    );
+      });
+      void import('@/lib/productImageCache').then(({ mergeProductImages }) =>
+        mergeProductImages(tenantStorageId, merged, prev).then(hydrated => {
+          setProducts(current => {
+            const priorById = new Map(current.map(p => [p.id, p]));
+            return hydrated.map(p => ({
+              ...p,
+              imageUrl: p.imageUrl || priorById.get(p.id)?.imageUrl,
+            }));
+          });
+        }),
+      );
+      return merged;
+    });
     if (scoped.customersFetchOk !== false) {
+      const hqBranchId = resolveDefaultBranchId(scoped.branches);
       setCustomers(prev =>
-        branchScoped
-          ? scoped.customers
-          : mergeCustomersFromApi(prev, scoped.customers, branchId),
+        branchId
+          ? mergeCustomersFromApi([], scoped.customers, branchId, hqBranchId)
+          : branchScoped
+            ? scoped.customers
+            : mergeCustomersFromApi(prev, scoped.customers, branchId, hqBranchId),
       );
     }
     setSuppliers(scoped.suppliers);
     setBranches(scoped.branches);
     setExpenses(scoped.expenses);
     setEvents(scoped.events);
-    setStaffList(scoped.staff);
-    if (scoped.staff.length) setActiveStaffMember(scoped.staff[0]);
+    setStaffList(staffForState);
+    if (staffForState.length) setActiveStaffMember(staffForState[0]);
     setPurchaseOrders(scoped.purchaseOrders);
     setSales(scoped.sales);
     setStockMovements(scoped.stockMovements);
     if (scoped.dashboardStats) setDashboardStats(scoped.dashboardStats);
   };
 
-  const persistTenantSnapshot = async (data: ApiSyncResult) => {
-    const branchId = resolveApiBranchId();
+  const persistTenantSnapshot = async (data: ApiSyncResult, forBranchId?: string | null) => {
+    const branchId = forBranchId ?? resolveApiBranchId();
     const stats = await fetchDashboardStats(branchId).catch(() => null);
     if (stats) setDashboardStats(stats);
     const savedAt = new Date().toISOString();
@@ -332,11 +376,16 @@ export default function DukaPortal() {
     if (!currentUser || currentUser.isBranchScoped) return;
     const isOwnerWide = currentUser.role === 'vendor_owner' || currentUser.staffRole === 'Owner';
     if (!isOwnerWide || !branches.length) return;
-    if (activeBranchId === 'all' || !branches.some(b => b.id === activeBranchId)) {
+    if (!activeBranchId || !branches.some(b => b.id === activeBranchId)) {
+      const persisted = loadPersistedActiveBranchId(tenantStorageId);
+      if (persisted && branches.some(b => b.id === persisted)) {
+        setActiveBranchId(persisted);
+        return;
+      }
       const hq = resolveDefaultBranchId(branches);
       if (hq) setActiveBranchId(hq);
     }
-  }, [branches, currentUser?.id, currentUser?.isBranchScoped, activeBranchId]);
+  }, [branches, currentUser?.id, currentUser?.isBranchScoped, activeBranchId, tenantStorageId]);
 
   useEffect(() => {
     if (!tenantStorageId) return;
@@ -349,6 +398,13 @@ export default function DukaPortal() {
 
   useEffect(() => {
     setSidebarOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'tra-efd') {
+      sessionStorage.setItem('duka_reports_hub', 'tra');
+      setActiveTab('reports');
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -374,41 +430,77 @@ export default function DukaPortal() {
     setOfflineNotice(mutationQueuedText(isSw, entityType));
   };
 
-  const applyApiTenantData = async (): Promise<{ ok: boolean; fromCache: boolean }> => {
-    const branchId = resolveApiBranchId();
+  const applyApiTenantData = async (
+    overrideBranchId?: string | null,
+  ): Promise<{ ok: boolean; fromCache: boolean }> => {
+    const branchId = overrideBranchId ?? resolveApiBranchId();
     if (!navigator.onLine) {
       const cached = await loadTenantCache(tenantStorageId, branchId);
       if (cached) {
-        applyTenantSnapshot(cached);
+        applyTenantSnapshot(cached, branchId);
         setCacheSavedAt(cached.savedAt);
         return { ok: true, fromCache: true };
       }
       return { ok: false, fromCache: false };
     }
-    const data = await syncTenantFromApi(branchId);
+    const data = await syncTenantFromApi(branchId, tenantStorageId);
     if (!data) {
       const cached = await loadTenantCache(tenantStorageId, branchId);
       if (cached) {
-        applyTenantSnapshot(cached);
+        applyTenantSnapshot(cached, branchId);
         setCacheSavedAt(cached.savedAt);
         return { ok: true, fromCache: true };
       }
       return { ok: false, fromCache: false };
     }
-    applyTenantSnapshot(data);
-    await persistTenantSnapshot(data);
+    applyTenantSnapshot(data, branchId);
+    await persistTenantSnapshot(data, branchId);
     return { ok: true, fromCache: false };
   };
+
+  const handleSwitchBranch = useCallback(
+    async (branchId: string) => {
+      if (!branchId || currentUser?.isBranchScoped) return;
+      const current = resolveApiBranchId();
+      if (branchId === current) return;
+
+      const branch = branches.find(b => b.id === branchId);
+      setBranchSwitching(true);
+      setActiveBranchId(branchId);
+      savePersistedActiveBranchId(tenantStorageId, branchId);
+
+      if (currentUser && branch) {
+        const nextUser: AuthUser = {
+          ...currentUser,
+          branch: branch.name,
+          branchName: branch.name,
+          branchId: branch.id,
+          branchType: branch.type,
+        };
+        setCurrentUser(nextUser);
+        persistAuthUser(nextUser);
+      }
+
+      setPosPreloadCart(null);
+      setPosPreloadCustomer(null);
+      setPosResumeSaleId(null);
+      setPosPreloadDraftId(null);
+      setPosTableLabel(null);
+      setBranchWorkspaceKey(k => k + 1);
+    },
+    [branches, currentUser, tenantStorageId],
+  );
 
   const refreshCustomersFromApi = async () => {
     try {
       const branchId = resolveApiBranchId();
-      const nextCustomers = await fetchCustomersFromApi(branchId);
+      const hqBranchId = resolveDefaultBranchId(branches);
+      const nextCustomers = await fetchCustomersFromApi(branchId, branches);
       const branchScoped = Boolean(currentUser?.isBranchScoped && currentUser?.branchId);
       setCustomers(prev =>
         branchScoped
           ? nextCustomers
-          : mergeCustomersFromApi(prev, nextCustomers, branchId),
+          : mergeCustomersFromApi(prev, nextCustomers, branchId, hqBranchId),
       );
     } catch {
       /* keep current list */
@@ -507,6 +599,8 @@ export default function DukaPortal() {
     setStaffList(EMPTY_STAFF);
     setExpenses(EMPTY_EXPENSES);
     setBranches(EMPTY_BRANCHES);
+    setActiveBranchId('');
+    clearPersistedActiveBranchId(tenantStorageId);
     setTenants(EMPTY_TENANTS);
     setDashboardStats(null);
     setPendingSyncQueue([]);
@@ -531,11 +625,13 @@ export default function DukaPortal() {
         const restoreBranchId =
           result.user.isBranchScoped && result.user.branchId
             ? result.user.branchId
-            : result.user.branchId ?? null;
+            : loadPersistedActiveBranchId(tid) ||
+              result.user.branchId ||
+              null;
         if (restoreBranchId) {
           const cached = await loadTenantCache(tid, restoreBranchId);
           if (cached) {
-            applyTenantSnapshot(cached);
+            applyTenantSnapshot(cached, restoreBranchId);
             setCacheSavedAt(cached.savedAt);
           }
         }
@@ -546,7 +642,7 @@ export default function DukaPortal() {
         }
 
         if (result.user.role !== 'super_admin') {
-          const sync = await applyApiTenantData();
+          const sync = await applyApiTenantData(restoreBranchId);
           if (result.offline || sync.fromCache || !navigator.onLine) {
             setOfflineNotice(offlineBannerText(language === 'sw', savedQueue.length));
           } else {
@@ -574,7 +670,12 @@ export default function DukaPortal() {
     if (activeTab === 'inventory' || activeTab === 'pos') {
       void refreshProductsFromApi();
     }
-    if (activeTab === 'dashboard' || activeTab === 'pos' || activeTab === 'transaction-history' || activeTab === 'reports' || activeTab === 'analytics') {
+    if (
+      activeTab === 'dashboard' ||
+      activeTab === 'transaction-history' ||
+      activeTab === 'reports' ||
+      activeTab === 'analytics'
+    ) {
       void applyApiTenantData();
     }
     if (activeTab === 'customers' || activeTab === 'receivables-payables' || activeTab === 'debts' || activeTab === 'receivables' || activeTab === 'payables' || activeTab === 'pos') {
@@ -587,8 +688,16 @@ export default function DukaPortal() {
 
   useEffect(() => {
     if (!currentUser || userRole === 'super_admin') return;
-    void applyApiTenantData();
-  }, [activeBranchId, currentUser?.id, currentUser?.isBranchScoped, currentUser?.branchId]);
+    if (!resolveApiBranchId()) return;
+    let cancelled = false;
+    setBranchSwitching(true);
+    void applyApiTenantData().finally(() => {
+      if (!cancelled) setBranchSwitching(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBranchId, currentUser?.id, currentUser?.isBranchScoped, currentUser?.branchId, branches.length]);
 
   useEffect(() => {
     if (!currentUser || userRole === 'super_admin') return;
@@ -645,14 +754,26 @@ export default function DukaPortal() {
       setActiveTab('super-dashboard');
       await applyAdminData();
     } else {
-      await applyApiTenantData();
+      initBranchContextFromUser(user);
+      const tid = user.businessId || user.id || 'local';
+      const loginBranchId =
+        user.isBranchScoped && user.branchId
+          ? user.branchId
+          : loadPersistedActiveBranchId(tid) || user.branchId || null;
+      await applyApiTenantData(loginBranchId);
+      void ensureDemoRichSeed({
+        userEmail: user.email,
+        tenantId: tid,
+        branchId: loginBranchId,
+        staffList: [],
+        refreshTenant: () => applyApiTenantData(loginBranchId),
+      });
       const bt = user.businessType || businessType;
       if (options?.fromRegistration && authPreselectPlan) {
         setCurrentPlanTier(authPreselectPlan);
       }
       if (user.subscriptionExpiry) setSubscriptionExpiry(user.subscriptionExpiry);
       else if (user.plan) setCurrentPlanTier(user.plan);
-      initBranchContextFromUser(user);
       setActiveTab(options?.fromRegistration ? getDefaultWorkplaceTab(bt) : 'dashboard');
     }
   };
@@ -1228,20 +1349,41 @@ export default function DukaPortal() {
   // Derived telemetry metrics (branch-scoped)
   const apiBranchId = resolveApiBranchId();
   const branchScopedProducts = useMemo(
-    () => filterByBranchId(products, apiBranchId),
-    [products, apiBranchId],
+    () => filterByActiveBranch(products, apiBranchId, branches),
+    [products, apiBranchId, branches],
   );
   const branchScopedCustomers = useMemo(
-    () => filterByBranchId(customers, apiBranchId),
-    [customers, apiBranchId],
+    () => filterByActiveBranch(customers, apiBranchId, branches),
+    [customers, apiBranchId, branches],
   );
   const branchScopedEvents = useMemo(
-    () => filterByBranchId(events, apiBranchId),
-    [events, apiBranchId],
+    () => filterByActiveBranch(events, apiBranchId, branches),
+    [events, apiBranchId, branches],
   );
+  const branchScopedStaff = useMemo(
+    () => filterStaffByBranch(staffList, apiBranchId, branches),
+    [staffList, apiBranchId, branches],
+  );
+  const branchScopedExpenses = useMemo(
+    () => filterByActiveBranch(expenses, apiBranchId, branches),
+    [expenses, apiBranchId, branches],
+  );
+  const branchScopedSales = useMemo(
+    () => filterByActiveBranch(sales, apiBranchId, branches),
+    [sales, apiBranchId, branches],
+  );
+  const branchScopedPurchaseOrders = useMemo(
+    () => filterPurchaseOrdersByBranch(purchaseOrders, apiBranchId, new Set(branchScopedProducts.map(p => p.id))),
+    [purchaseOrders, apiBranchId, branchScopedProducts],
+  );
+  const activeBranchRecord = branches.find(b => b.id === apiBranchId);
+  const activeBranchAddress = activeBranchRecord?.address || activeBranchRecord?.district;
   const lowStockCount = branchScopedProducts.filter(p => p.stock <= p.reorderPoint).length;
   const overdueCreditCount = branchScopedCustomers.filter(c => c.daysOverdue > 0).length;
   const upcomingEventsCount = branchScopedEvents.filter(e => !e.completed).length;
+  const showBranchSwitcher = Boolean(
+    currentUser && userRole !== 'super_admin' && canSwitchTenantBranch(currentUser) && branches.length > 0,
+  );
 
   // Pending approval flow disabled — new tenants are active immediately after register.
 
@@ -1322,16 +1464,19 @@ export default function DukaPortal() {
       billingSettings.graceDays,
     );
 
+  const vendorTenantApiId =
+    !isSuperAdminMode && currentUser?.businessId ? currentUser.businessId : undefined;
+
   return (
     <TaxComplianceProvider
-      tenantId={currentUser?.businessId || currentUser?.id}
+      tenantId={vendorTenantApiId}
       businessName={businessName || currentUser?.businessName}
       tinNumber={currentUser?.tinNumber}
     >
-    <TraReceiptProvider tenantId={currentUser?.businessId || currentUser?.id}>
-    <TenantThemeProvider tenantId={currentUser?.businessId || currentUser?.id}>
+    <TraReceiptProvider key={`tra-${vendorTenantApiId ?? 'local'}-${apiBranchId ?? 'none'}`} tenantId={vendorTenantApiId}>
+    <TenantThemeProvider tenantId={vendorTenantApiId}>
     <DocumentTemplateProvider
-      tenantId={currentUser?.businessId || currentUser?.id}
+      tenantId={vendorTenantApiId}
       businessName={businessName || currentUser?.businessName}
     >
     {/* ─── FULL-SCREEN POS MODE: no sidebar, no header ─────────────────────── */}
@@ -1343,6 +1488,7 @@ export default function DukaPortal() {
           products={products}
           customers={customers}
           activeBranchId={resolveApiBranchId()}
+          branches={branches}
           branchVatRegistered={branches.find(b => b.id === resolveApiBranchId())?.vatRegistered}
           setCustomers={setCustomers}
           onCustomersChanged={refreshCustomersFromApi}
@@ -1426,7 +1572,9 @@ export default function DukaPortal() {
           currentUser={currentUser}
           staffRole={currentUser?.staffRole}
           branchLabel={
-            branches.find(b => b.id === activeBranchId)?.name ||
+            activeBranchRecord?.name ||
+            currentUser?.branchName ||
+            currentUser?.branch ||
             branches[0]?.name
           }
           onLogout={handleLogout}
@@ -1466,7 +1614,20 @@ export default function DukaPortal() {
           tenantsList={tenants}
           onSelectTenantToImpersonate={handleImpersonateTenant}
           onToggleSidebar={() => setSidebarOpen(open => !open)}
+          branches={branches}
+          activeBranchId={apiBranchId}
+          activeBranchName={activeBranchRecord?.name || currentUser?.branchName || currentUser?.branch}
+          canSwitchBranch={showBranchSwitcher}
+          branchSwitching={branchSwitching}
+          onSwitchBranch={id => void handleSwitchBranch(id)}
         />
+
+        {branchSwitching && !isSuperAdminMode && (
+          <div className="mx-3 mt-2 px-4 py-2 rounded-xl text-xs font-semibold border bg-[#E8EEF7] text-[#0F2347] border-[#C5D0E6] flex items-center gap-2 shrink-0">
+            <div className="w-4 h-4 border-2 border-[#0F2347] border-t-transparent rounded-full animate-spin" />
+            {isSw ? 'Inabadilisha tawi — data zinasasishwa…' : 'Switching branch — refreshing all data…'}
+          </div>
+        )}
 
         {(offlineNotice || (!isOnline && currentUser)) && (
           <div
@@ -1496,8 +1657,8 @@ export default function DukaPortal() {
 
         {/* Scrollable View Container */}
         {/* Avoid backdrop-filter/transform here — they trap position:fixed modals inside the scroll pane. */}
-        <main className={`flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 rounded-none sm:rounded-2xl shadow-sm pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-6 ${isSuperAdminMode ? 'bg-[#F9F9F7] border border-[#003322]/10' : 'bg-white border border-[#E1DFDD]/80'}`}>
-          <div className="max-w-7xl mx-auto w-full min-w-0">
+        <main className={`flex-1 overflow-y-auto overflow-x-hidden p-2.5 sm:p-3 md:p-4 lg:pr-5 rounded-none sm:rounded-xl lg:rounded-2xl shadow-sm pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-4 min-w-0 ${isSuperAdminMode ? 'bg-[#F9F9F7] border border-[#003322]/10' : 'bg-white border border-[#E1DFDD]/80'}`}>
+          <div key={branchWorkspaceKey} className="max-w-7xl mx-auto w-full min-w-0">
             {!isSuperAdminMode && (
               <ModuleContextBar
                 activeTab={activeTab}
@@ -1648,10 +1809,10 @@ export default function DukaPortal() {
                   <DashboardView
                     language={language}
                     businessType={businessType}
-                    customers={customers}
-                    products={products}
-                    sales={sales}
-                    expenses={expenses}
+                    customers={branchScopedCustomers}
+                    products={branchScopedProducts}
+                    sales={branchScopedSales}
+                    expenses={branchScopedExpenses}
                     currentUser={currentUser}
                     userRole={userRole}
                     onNavigate={setActiveTab}
@@ -1675,8 +1836,8 @@ export default function DukaPortal() {
                     setProducts={setProducts}
                     staffMembers={staffList}
                     currentUser={currentUser}
-                    activeBranchId={activeBranchId}
-                    setActiveBranchId={setActiveBranchId}
+                    activeBranchId={apiBranchId || activeBranchId}
+                    setActiveBranchId={id => void handleSwitchBranch(id)}
                     currentPlanTier={currentPlanTier}
                     setCurrentPlanTier={setCurrentPlanTier}
                     tenantId={tenantStorageId}
@@ -1698,6 +1859,8 @@ export default function DukaPortal() {
                     supplierPayments={supplierPayments}
                     setSupplierPayments={setSupplierPayments}
                     sales={sales}
+                    products={products}
+                    branches={branches}
                     currentUser={currentUser}
                     activeBranchId={resolveApiBranchId()}
                     initialTab={receivablesInitialTab(activeTab)}
@@ -1710,12 +1873,13 @@ export default function DukaPortal() {
                   <Suspense fallback={<TabLoading />}>
                   <BIAnalyticsDashboard
                     language={language}
-                    sales={sales}
-                    products={products}
-                    customers={customers}
-                    expenses={expenses}
-                    staffList={staffList}
+                    sales={branchScopedSales}
+                    products={branchScopedProducts}
+                    customers={branchScopedCustomers}
+                    expenses={branchScopedExpenses}
+                    staffList={branchScopedStaff}
                     suppliers={suppliers}
+                    activeBranchName={activeBranchRecord?.name || currentUser?.branchName || currentUser?.branch}
                     onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
                     onNavigateToExpenses={() => setActiveTab('expenses-payroll')}
                     onNavigateToGeoMatrix={() => setActiveTab('product-geo-matrix')}
@@ -1729,6 +1893,7 @@ export default function DukaPortal() {
                     customers={customers}
                     products={products}
                     sales={sales}
+                    branches={branches}
                     activeBranchId={resolveApiBranchId()}
                     onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
                     onNavigateToPOSWithItem={(prod) => {
@@ -1741,12 +1906,19 @@ export default function DukaPortal() {
                   <Suspense fallback={<TabLoading />}>
                   <StaffUsersView
                     language={language}
-                    staffList={staffList}
+                    staffList={branchScopedStaff}
                     setStaffList={setStaffList}
                     currentUser={currentUser}
-                    sales={sales}
+                    sales={branchScopedSales}
                     tenantStorageId={tenantStorageId}
+                    activeBranchId={apiBranchId}
+                    activeBranchName={activeBranchRecord?.name}
+                    initialSection={staffPeopleSection}
                     onNavigate={setActiveTab}
+                    onNavigateToAccounting={() => {
+                      setStaffPeopleSection(undefined);
+                      setActiveTab('accounting');
+                    }}
                     onSwitchToStaffSite={canSwitchStaffWorkstation(currentUser) ? handleSwitchToStaffSite : undefined}
                   />
                   </Suspense>
@@ -1756,14 +1928,20 @@ export default function DukaPortal() {
                   <Suspense fallback={<TabLoading />}>
                   <ExpensesPayrollView
                     language={language}
-                    expenses={expenses}
+                    expenses={branchScopedExpenses}
                     setExpenses={setExpenses}
-                    staffList={staffList}
+                    staffList={branchScopedStaff}
                     setStaffList={setStaffList}
                     currentUser={currentUser}
                     tenantStorageId={tenantStorageId}
+                    activeBranchId={apiBranchId}
+                    activeBranchName={activeBranchRecord?.name}
                     initialTab={expensesInitialTab(activeTab)}
                     onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
+                    onOpenStatutoryPayroll={() => {
+                      setStaffPeopleSection('payroll');
+                      setActiveTab('staff');
+                    }}
                   />
                   </Suspense>
                 )}
@@ -1772,10 +1950,10 @@ export default function DukaPortal() {
                   <Suspense fallback={<TabLoading />}>
                   <PredictiveAnalyticsView
                     language={language}
-                    products={products}
-                    sales={sales}
+                    products={branchScopedProducts}
+                    sales={branchScopedSales}
                     suppliers={suppliers}
-                    purchaseOrders={purchaseOrders}
+                    purchaseOrders={branchScopedPurchaseOrders}
                     onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
                     onNavigateToSuppliers={() => setActiveTab('suppliers')}
                   />
@@ -1817,6 +1995,7 @@ export default function DukaPortal() {
                     language={language}
                     customers={customers}
                     activeBranchId={resolveApiBranchId()}
+                    branches={branches}
                     setCustomers={setCustomers}
                     onCustomersChanged={refreshCustomersFromApi}
                     onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
@@ -1836,6 +2015,7 @@ export default function DukaPortal() {
                     lowStockCount={lowStockCount}
                     overdueCreditCount={overdueCreditCount}
                     activeBranchId={resolveApiBranchId()}
+                    branches={branches}
                     currentUser={currentUser}
                   />
                 )}
@@ -1859,6 +2039,7 @@ export default function DukaPortal() {
                     onProductsChanged={refreshProductsFromApi}
                     currentUser={currentUser}
                     tenantId={tenantStorageId}
+                    activeBranchId={resolveApiBranchId()}
                     enqueueSyncItem={enqueueSyncItem}
                     onQueueMutation={notifyQueuedMutation}
                   />
@@ -1884,19 +2065,46 @@ export default function DukaPortal() {
                     businessType={businessType}
                     currentUser={currentUser}
                     activeBranchId={resolveApiBranchId()}
+                    branches={branches}
+                  />
+                )}
+
+                {activeTab === 'accounting' && (
+                  <AccountingHubView
+                    language={language}
+                    businessName={businessName || currentUser?.businessName}
+                    branchId={resolveApiBranchId()}
+                    branchName={
+                      activeBranchRecord?.name ||
+                      currentUser?.branchName ||
+                      currentUser?.branch
+                    }
+                    sales={branchScopedSales}
+                    products={branchScopedProducts}
+                    customers={branchScopedCustomers}
+                    expenses={branchScopedExpenses}
+                    purchaseOrders={branchScopedPurchaseOrders}
+                    onNavigateToPayroll={() => {
+                      setStaffPeopleSection('payroll');
+                      setActiveTab('staff');
+                    }}
                   />
                 )}
 
                 {(activeTab === 'reports' || activeTab === 'analytics') && (
                   <ReportsAnalyticsView
                     language={language}
-                    sales={sales}
-                    products={products}
+                    sales={branchScopedSales}
+                    products={branchScopedProducts}
                     suppliers={suppliers}
-                    purchaseOrders={purchaseOrders}
+                    purchaseOrders={branchScopedPurchaseOrders}
                     onOpenAIChatWithPrompt={handleOpenAIChatWithPrompt}
                     onNavigateToSuppliers={() => setActiveTab('suppliers')}
                     currentUser={currentUser}
+                    activeBranchId={apiBranchId}
+                    activeBranchName={activeBranchRecord?.name || currentUser?.branchName || currentUser?.branch}
+                    activeBranchAddress={activeBranchAddress}
+                    activeBranch={activeBranchRecord ?? null}
                   />
                 )}
 
@@ -1914,15 +2122,7 @@ export default function DukaPortal() {
                 )}
 
                 {activeTab === 'transaction-history' && (
-                  <TransactionHistoryView language={language} sales={sales} />
-                )}
-
-                {activeTab === 'tra-efd' && (
-                  <TraEfdHubView
-                    language={language}
-                    businessName={businessName || currentUser?.businessName}
-                    tinNumber={currentUser?.tinNumber}
-                  />
+                  <TransactionHistoryView language={language} sales={branchScopedSales} />
                 )}
 
                 {(activeTab === 'profile' || activeTab === 'settings') && (
@@ -1937,13 +2137,13 @@ export default function DukaPortal() {
                     location={currentUser?.location}
                     tinNumber={currentUser?.tinNumber}
                     licenseNumber={currentUser?.licenseNumber}
-                    staffList={staffList}
+                    staffList={branchScopedStaff}
                     setStaffList={setStaffList}
                     onSwitchToStaffSite={canSwitchStaffWorkstation(currentUser) ? handleSwitchToStaffSite : undefined}
                     onNavigate={setActiveTab}
                     currentPlanTier={currentPlanTier}
                     subscriptionExpiry={subscriptionExpiry}
-                    sales={sales}
+                    sales={branchScopedSales}
                   />
                 )}
               </>

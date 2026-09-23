@@ -9,6 +9,8 @@ import type {
 } from '@/types/traReceipt';
 import type { TaxComplianceSettings } from '@/lib/taxComplianceSettings';
 import { generateReceiptNumber, generateTraSignature } from '@/lib/taxComplianceSettings';
+import { api } from '@/lib/api';
+import { traCustomerIdTypeToCode } from '@/lib/traEfdConfigMap';
 
 export interface TraReceiptBuildInput {
   sale: SaleTransaction;
@@ -124,31 +126,22 @@ export async function testEfdConnection(settings: EfdApiSettings): Promise<{
   ok: boolean;
   message: string;
 }> {
-  if (!settings.apiBaseUrl.trim()) {
-    return { ok: false, message: 'API base URL is required.' };
+  if (!settings.clientId.trim()) {
+    return { ok: false, message: 'Client ID is required.' };
   }
-  const base = settings.apiBaseUrl.replace(/\/$/, '');
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
-  if (settings.deviceId) headers['X-Device-Id'] = settings.deviceId;
-
+  if (!settings.hasClientSecret && !settings.clientSecret.trim()) {
+    return { ok: false, message: 'Client secret is required for the first connection test.' };
+  }
+  if (!api.hasValidSession()) {
+    return { ok: false, message: 'Sign in to test TRA connection securely on the server.' };
+  }
   try {
-    const res = await fetch(`${base}/health`, { method: 'GET', headers });
-    if (res.ok) {
-      const text = await res.text();
-      return { ok: true, message: text || 'Connection successful.' };
-    }
-    if (res.status === 404) {
-      return {
-        ok: true,
-        message: 'Endpoint reachable (health path not found — try submitting a receipt).',
-      };
-    }
-    return { ok: false, message: `HTTP ${res.status}: ${await res.text()}` };
+    const result = await api.testTraEfdConnection();
+    return { ok: result.ok, message: result.message };
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : 'Network error',
+      message: err instanceof Error ? err.message : 'Connection test failed',
     };
   }
 }
@@ -159,93 +152,95 @@ export async function submitReceiptToEfdApi(
   taxSettings: TaxComplianceSettings,
   meta: { companyName: string; customerMobile?: string; customerIdType?: TraCustomerIdType; customerIdNumber?: string },
 ): Promise<EfdApiSubmitResult> {
-  const base = settings.apiBaseUrl.replace(/\/$/, '');
-  const payload = {
-    deviceId: settings.deviceId,
-    zNumber: settings.zNumber || settings.deviceId,
-    vrn: taxSettings.vrnNumber,
-    tin: taxSettings.tinNumber,
-    companyName: meta.companyName,
-    invoiceReference: sale.receiptNumber,
-    posOrderId: sale.id,
-    customerName: sale.customerName || 'Walk-in Customer',
-    customerMobile: meta.customerMobile || '',
-    customerIdType: meta.customerIdType || 'None',
-    customerIdNumber: meta.customerIdNumber || '',
-    items: sale.items.map(i => ({
-      name: i.productName,
-      quantity: i.quantity,
-      unitPrice: i.unitPrice,
-      total: i.total ?? i.unitPrice * i.quantity,
-    })),
-    totalExclTax: sale.subtotal - (sale.discountAmount ?? 0),
-    totalVat: sale.vatAmount,
-    totalInclTax: sale.total,
-    demoMode: settings.demoMode,
-  };
+  if (!api.hasValidSession()) {
+    return {
+      ok: false,
+      errorMessage: 'Sign in to issue fiscal receipts through the secure server proxy.',
+      status: 'failed',
+    };
+  }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-  if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
-  if (settings.apiSecret) headers['X-Api-Secret'] = settings.apiSecret;
-  if (settings.deviceId) headers['X-Device-Id'] = settings.deviceId;
-
+  const idTypeCode = traCustomerIdTypeToCode(meta.customerIdType);
   try {
-    const res = await fetch(`${base}/receipts`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
+    const response = await api.generateTraFiscalReceipt({
+      sale: {
+        id: sale.id,
+        receipt_number: sale.receiptNumber,
+        date: sale.date,
+        customer_name: sale.customerName,
+        subtotal: sale.subtotal,
+        vat_amount: sale.vatAmount,
+        total: sale.total,
+        items: sale.items.map(i => ({
+          product_id: i.productId,
+          product_name: i.productName,
+          quantity: i.quantity,
+          unit_price: i.unitPrice,
+          total: i.total ?? i.unitPrice * i.quantity,
+          discount_percent: i.discountPercent,
+        })),
+      },
+      customer: {
+        name: sale.customerName || 'Walk-in Customer',
+        mobile: meta.customerMobile || '',
+        id_type: idTypeCode,
+        id_number: meta.customerIdNumber || '',
+      },
+      vat_rate: taxSettings.vatRate,
+      branch_id: sale.branchId,
+      payment_type: 'CASH',
     });
-    const text = await res.text();
-    let parsed: Record<string, unknown> = {};
-    try {
-      parsed = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      parsed = { raw: text };
-    }
 
-    if (!res.ok) {
+    const rawText = JSON.stringify(response, null, 2);
+    if (!response.ok) {
       return {
         ok: false,
-        errorMessage: `HTTP ${res.status}`,
-        rawResponse: text,
+        errorMessage: String(response.error || 'TRA rejected receipt'),
+        rawResponse: rawText,
         status: 'failed',
       };
     }
 
-    const data = (parsed.data ?? parsed) as Record<string, unknown>;
-    const statusStr = String(data.status ?? parsed.status ?? '').toLowerCase();
-    const msg = String(data.MSG ?? data.msg ?? data.message ?? data.error ?? '');
-    if (statusStr === 'error' || statusStr === 'failed' || statusStr === 'rejected') {
-      return {
-        ok: false,
-        errorMessage: msg || 'TRA rejected receipt',
-        rawResponse: text,
-        status: 'failed',
-      };
-    }
-
-    const verificationCode = String(data.verificationCode ?? data.verification_code ?? data.RCTVNUM ?? '');
-    const verificationLink = String(data.verificationLink ?? data.verification_link ?? data.qrcode ?? data.QRCODE ?? '');
+    const verificationCode = String(
+      response.verification_code ?? response.verificationCode ?? '',
+    );
+    const verificationLink = String(
+      response.verification_link ?? response.verify_link ?? response.verificationLink ?? '',
+    );
 
     return {
       ok: true,
-      receiptNumber: String(data.receiptNumber ?? data.receipt_number ?? sale.receiptNumber),
+      receiptNumber: String(response.receipt_number ?? sale.receiptNumber),
       verificationCode,
       verificationLink,
-      zNumber: String(data.zNumber ?? data.z_number ?? settings.zNumber),
-      vrn: String(data.vrn ?? taxSettings.vrnNumber),
+      zNumber: String(response.z_number ?? settings.zNumber ?? settings.companySerial ?? ''),
+      vrn: String(response.vrn ?? settings.companyVrn ?? taxSettings.vrnNumber),
       status: settings.demoMode ? 'demo' : 'success',
-      rawResponse: JSON.stringify(parsed, null, 2),
+      rawResponse: rawText,
     };
   } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Network error';
+    if (settings.demoMode) {
+      const receiptNumber = sale.receiptNumber || generateReceiptNumber(taxSettings);
+      const zNumber =
+        settings.zNumber || settings.companySerial || settings.deviceId || taxSettings.traEfdSerial || '—';
+      const vrn = settings.companyVrn ?? taxSettings.vrnNumber;
+      const demoCode =
+        generateTraSignature(taxSettings, receiptNumber).split('-').pop()?.slice(0, 12) ||
+        `DEMO${Date.now().toString(36).toUpperCase().slice(-8)}`;
+      const fallback = buildLocalTraResponse(receiptNumber, demoCode, zNumber, vrn, true);
+      fallback.rawResponse = JSON.stringify(
+        { source: 'demo_fallback', message: 'Server TRA unavailable — local demo receipt.', originalError: errorMessage },
+        null,
+        2,
+      );
+      return fallback;
+    }
     return {
       ok: false,
-      errorMessage: err instanceof Error ? err.message : 'Network error',
+      errorMessage,
       status: 'failed',
-      rawResponse: JSON.stringify({ error: String(err) }, null, 2),
+      rawResponse: JSON.stringify({ error: errorMessage }, null, 2),
     };
   }
 }
@@ -254,13 +249,14 @@ export async function issueTraReceipt(input: TraReceiptBuildInput): Promise<TraR
   const { sale, taxSettings, efdSettings, companyName } = input;
   const { date, time } = splitDateTime(sale.date);
   const vrn = taxSettings.vrnNumber || '';
-  const zNumber = efdSettings.zNumber || efdSettings.deviceId || taxSettings.traEfdSerial || '—';
+  const zNumber =
+    efdSettings.zNumber || efdSettings.companySerial || efdSettings.deviceId || taxSettings.traEfdSerial || '—';
   const receiptNumber = sale.receiptNumber || generateReceiptNumber(taxSettings);
   const items = saleItemsToTraItems(sale, taxSettings.vatRate);
 
   let apiResult: EfdApiSubmitResult;
 
-  if (taxSettings.mode === 'tra_efd' && efdSettings.enabled && efdSettings.apiBaseUrl.trim()) {
+  if (taxSettings.mode === 'tra_efd' && efdSettings.enabled && efdSettings.clientId.trim()) {
     apiResult = await submitReceiptToEfdApi(efdSettings, sale, taxSettings, {
       companyName,
       customerMobile: input.customerMobile,
@@ -268,26 +264,45 @@ export async function issueTraReceipt(input: TraReceiptBuildInput): Promise<TraR
       customerIdNumber: input.customerIdNumber,
     });
     if (!apiResult.ok) {
-      const verificationCode = generateTraSignature(taxSettings, receiptNumber).slice(-12) || `ERR-${Date.now().toString(36).toUpperCase()}`;
-      return buildTraReceiptRecord({
-        sale,
-        companyName,
-        receiptNumber,
-        verificationCode,
-        date,
-        time,
-        zNumber,
-        vrn,
-        verificationLink: '',
-        items,
-        status: 'failed',
-        isDemo: efdSettings.demoMode,
-        apiResponse: apiResult.rawResponse || apiResult.errorMessage,
-        customerMobile: input.customerMobile,
-        customerIdType: input.customerIdType,
-        customerIdNumber: input.customerIdNumber,
-        branchId: input.branchId,
-      });
+      if (efdSettings.demoMode) {
+        const originalError = apiResult.errorMessage || apiResult.rawResponse || 'TRA API error';
+        const demoCode =
+          generateTraSignature(taxSettings, receiptNumber).split('-').pop()?.slice(0, 12) ||
+          `DEMO${Date.now().toString(36).toUpperCase().slice(-8)}`;
+        apiResult = buildLocalTraResponse(receiptNumber, demoCode, zNumber, vrn, true);
+        apiResult.rawResponse = JSON.stringify(
+          {
+            source: 'demo_fallback',
+            message: 'Live TRA unavailable — showing demo fiscal receipt.',
+            originalError,
+          },
+          null,
+          2,
+        );
+      } else {
+        const verificationCode =
+          generateTraSignature(taxSettings, receiptNumber).slice(-12) ||
+          `ERR-${Date.now().toString(36).toUpperCase()}`;
+        return buildTraReceiptRecord({
+          sale,
+          companyName,
+          receiptNumber,
+          verificationCode,
+          date,
+          time,
+          zNumber,
+          vrn,
+          verificationLink: '',
+          items,
+          status: 'failed',
+          isDemo: false,
+          apiResponse: apiResult.rawResponse || apiResult.errorMessage,
+          customerMobile: input.customerMobile,
+          customerIdType: input.customerIdType,
+          customerIdNumber: input.customerIdNumber,
+          branchId: input.branchId,
+        });
+      }
     }
   } else if (taxSettings.mode === 'tra_efd') {
     const verificationCode =
@@ -370,7 +385,9 @@ async function buildTraReceiptRecord(opts: {
     ? await generateTraVerificationQrDataUrl(opts.verificationLink)
     : '';
 
-  const totalExcl = opts.sale.subtotal - (opts.sale.discountAmount ?? 0);
+  const totalIncl = opts.sale.total ?? 0;
+  const totalVat = opts.sale.vatAmount ?? 0;
+  const totalExcl = Math.max(0, Math.round(totalIncl - totalVat));
   return {
     id: `tra-${opts.sale.id}-${Date.now()}`,
     receiptNumber: opts.receiptNumber,
@@ -392,8 +409,8 @@ async function buildTraReceiptRecord(opts: {
     customerIdNumber: opts.customerIdNumber ?? '',
     customerMobile: opts.customerMobile ?? '',
     totalExclTax: totalExcl,
-    totalVat: opts.sale.vatAmount,
-    totalInclTax: opts.sale.total,
+    totalVat,
+    totalInclTax: totalIncl,
     status: opts.status,
     isDemo: opts.isDemo,
     items: opts.items,

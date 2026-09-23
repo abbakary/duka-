@@ -245,7 +245,7 @@ th{background:#F3F4F6;font-weight:700}
 </head><body>
 <div class="no-print-hint">${isSw
   ? 'Chapisha au chagua <strong>Save as PDF</strong> / Hifadhi kama PDF kwenye dirisha la print.'
-  : 'Print or choose <strong>Save as PDF</strong> in the print dialog to download this Odoo-style paper report.'}</div>
+  : 'Print or choose <strong>Save as PDF</strong> in the print dialog to download this paper report.'}</div>
 ${bodyHtml}<script>
 window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 280); });
 </script></body></html>`;

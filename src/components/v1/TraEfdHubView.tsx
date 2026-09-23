@@ -1,24 +1,21 @@
-import React from 'react';
-import type { Language } from '@/types/v1';
-import { TraEfdPage } from '@/components/v1/tra/TraEfdPage';
+import React, { useEffect } from 'react';
+import type { AuthUser, Language } from '@/types/v1';
+import { DUKA_REPORTS_HUB_KEY } from '@/components/v1/tra/TraEfdSetupView';
 
 interface TraEfdHubViewProps {
   language: Language;
   businessName?: string;
   tinNumber?: string;
-  /** @deprecated All tax settings are on this page — no external navigation needed */
-  onOpenTaxSettings?: () => void;
+  currentUser?: AuthUser | null;
+  onGoReports?: () => void;
 }
 
-/** Unified TRA & EFD page — setup, receipts, and reports in one place. */
-export const TraEfdHubView: React.FC<TraEfdHubViewProps> = ({
-  language,
-  businessName,
-  tinNumber,
-}) => (
-  <TraEfdPage
-    language={language}
-    businessName={businessName}
-    tinNumber={tinNumber}
-  />
-);
+/** @deprecated TRA hub moved to Finance → Reports. Redirects when mounted. */
+export const TraEfdHubView: React.FC<TraEfdHubViewProps> = ({ onGoReports }) => {
+  useEffect(() => {
+    sessionStorage.setItem(DUKA_REPORTS_HUB_KEY, 'tra');
+    onGoReports?.();
+  }, [onGoReports]);
+
+  return null;
+};

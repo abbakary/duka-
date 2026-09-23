@@ -60,7 +60,8 @@ import {
 import { computeSaleDiscountAmount, saleGrossSubtotal } from '@/lib/saleDiscountUtils';
 import { resolvePosPricingAccess, getDashboardPersona } from '@/lib/rbac';
 import { api } from '@/lib/api';
-import { mapCustomer, customerToApiPayload, filterByBranchId } from '@/lib/apiSync';
+import { mapCustomer, customerToApiPayload, filterByActiveBranch } from '@/lib/apiSync';
+import type { StoreBranch } from '@/types/v1';
 import {
   buildSaleFromCart,
   draftFromPosState,
@@ -77,6 +78,7 @@ import {
 } from '@/lib/dueDate';
 import { TraFiscalSlipPreview } from '@/components/v1/TraFiscalSlipPreview';
 import { printTraFiscalSlip } from '@/lib/traFiscalSlip';
+import { buildTraSlipMeta } from '@/lib/traFiscalSlipMeta';
 import {
   closeCashierShift,
   getOpenCashierShift,
@@ -111,6 +113,7 @@ interface POSViewProps {
   tableContextLabel?: string;
   currentUser?: AuthUser | null;
   activeBranchId?: string | null;
+  branches?: StoreBranch[];
   branchVatRegistered?: boolean | null;
   /** Leave full-screen POS back to main dashboard / menu */
   onExitPOS?: () => void;
@@ -141,6 +144,7 @@ export const POSView: React.FC<POSViewProps> = ({
   tableContextLabel,
   currentUser,
   activeBranchId,
+  branches = [],
   branchVatRegistered,
   onExitPOS,
 }) => {
@@ -169,8 +173,12 @@ export const POSView: React.FC<POSViewProps> = ({
   }, [tenantKey, staffKey]);
 
   const branchCustomers = useMemo(
-    () => filterByBranchId(customers, activeBranchId),
-    [customers, activeBranchId],
+    () => filterByActiveBranch(customers, activeBranchId, branches),
+    [customers, activeBranchId, branches],
+  );
+  const branchProducts = useMemo(
+    () => filterByActiveBranch(products, activeBranchId, branches),
+    [products, activeBranchId, branches],
   );
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -305,9 +313,9 @@ export const POSView: React.FC<POSViewProps> = ({
   const [stockWarningMessage, setStockWarningMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const categories = ['all', ...Array.from(new Set(products.map(p => p.category)))];
+  const categories = ['all', ...Array.from(new Set(branchProducts.map(p => p.category)))];
 
-  const filteredProducts = products.filter(p => {
+  const filteredProducts = branchProducts.filter(p => {
     const matchesSearch = productMatchesSearch(p, businessType, searchQuery)
       || p.sku.toLowerCase().includes(searchQuery.toLowerCase())
       || (p.batchNumber && p.batchNumber.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -811,7 +819,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
     if (setCustomers) {
       setCustomers(prev => {
-        const scoped = filterByBranchId(prev, activeBranchId);
+        const scoped = filterByActiveBranch(prev, activeBranchId, branches);
         return [created, ...scoped.filter(c => c.phone !== created.phone)];
       });
     }
@@ -974,10 +982,10 @@ export const POSView: React.FC<POSViewProps> = ({
         </div>
       )}
 
-      {/* POS LAYOUT: products + cart (desktop) / products + mobile sheet */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-4 pb-[4.5rem] lg:pb-0" style={{minHeight: 0, alignItems: 'start'}}>
-        {/* LEFT PRODUCT CATALOG */}
-        <div className="lg:col-span-6 space-y-3 min-w-0">
+      {/* POS LAYOUT: Odoo-style — narrow cart (left on desktop) + wide product grid */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-3 pb-[4.5rem] lg:pb-0" style={{minHeight: 0, alignItems: 'start'}}>
+        {/* PRODUCT CATALOG — wide column on desktop (right side) */}
+        <div className="lg:col-span-9 lg:col-start-4 space-y-3 min-w-0">
           <div className="bg-white rounded-xl p-2.5 sm:p-3 border border-[#E1DFDD] shadow-xs space-y-2 sticky top-0 z-[1]">
             <div className="flex gap-2">
               <div className="relative flex-1 min-w-0">
@@ -1018,7 +1026,7 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3 overflow-y-auto overscroll-contain pr-0.5" style={{maxHeight: 'calc(100dvh - 11rem)'}}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-2.5 overflow-y-auto overscroll-contain pr-0.5" style={{maxHeight: 'calc(100dvh - 11rem)'}}>
             {filteredProducts.map(prod => {
               const isOutOfStock = prod.stock <= 0;
               const isLowStock = prod.stock > 0 && prod.stock <= prod.reorderPoint;
@@ -1032,14 +1040,14 @@ export const POSView: React.FC<POSViewProps> = ({
                   type="button"
                   disabled={isOutOfStock}
                   onClick={() => !isOutOfStock && handleAddToCart(prod)}
-                  className={`text-left bg-white rounded-xl border shadow-xs transition-all flex flex-col overflow-hidden select-none isolate ${
+                  className={`text-left bg-white rounded-lg border transition-all flex flex-col overflow-hidden select-none isolate h-full ${
                     isOutOfStock
                       ? 'border-rose-200 bg-rose-50/40 opacity-70 cursor-not-allowed'
-                      : 'border-[#E1DFDD] hover:border-[#6264A7] hover:shadow-md cursor-pointer'
+                      : 'border-[#E1DFDD] hover:border-[#714B67] hover:shadow-md cursor-pointer'
                   }`}
                 >
-                  <div className="relative">
-                    <ProductImageThumb src={prod.imageUrl} name={prod.name} size="pos" />
+                  <div className="relative bg-white">
+                    <ProductImageThumb src={prod.imageUrl} name={prod.name} size="posOdoo" />
                     {inCartQty > 0 && (
                       <span className="absolute top-1.5 left-1.5 min-w-[1.35rem] h-5 px-1 rounded-full bg-[#6264A7] text-white text-[10px] font-black flex items-center justify-center shadow">
                         {inCartQty}
@@ -1057,9 +1065,8 @@ export const POSView: React.FC<POSViewProps> = ({
                       </span>
                     )}
                   </div>
-                  <div className="p-2 sm:p-2.5 flex flex-col flex-1 gap-0.5">
-                    <span className="text-[9px] font-mono text-[#8A8886] truncate">{prod.sku}</span>
-                    <h4 className="text-[11px] sm:text-xs font-bold text-[#323130] line-clamp-2 leading-snug min-h-[2.2em]">
+                  <div className="p-2 sm:p-2.5 flex flex-col flex-1 gap-1 border-t border-[#F3F2F1]">
+                    <h4 className="text-[10px] sm:text-[11px] font-semibold text-[#323130] line-clamp-3 leading-tight uppercase tracking-tight min-h-[2.8em]">
                       {prod.name}
                     </h4>
                     <ProductMetaBadges
@@ -1068,15 +1075,18 @@ export const POSView: React.FC<POSViewProps> = ({
                       language={language}
                       variant="line"
                       max={1}
-                      className="mt-0.5 hidden sm:flex"
+                      className="hidden md:flex"
                     />
-                    <div className="mt-auto pt-1.5 flex items-center justify-between gap-1">
-                      <span className="text-xs sm:text-sm font-extrabold text-[#0078D4] truncate">
-                        {formatTSh(prod.price)}
-                      </span>
+                    <div className="mt-auto flex items-end justify-between gap-1 pt-1">
+                      <div className="min-w-0">
+                        <p className="text-sm sm:text-base font-extrabold text-[#714B67] tabular-nums leading-none">
+                          {formatTSh(prod.price)}
+                        </p>
+                        <p className="text-[9px] text-[#8A8886] font-mono truncate mt-0.5">{prod.sku}</p>
+                      </div>
                       {!isOutOfStock && (
-                        <span className="w-7 h-7 rounded-lg bg-[#F3F2F1] text-[#323130] flex items-center justify-center shrink-0">
-                          <Plus className="w-3.5 h-3.5" />
+                        <span className="w-8 h-8 rounded-md bg-[#714B67] text-white flex items-center justify-center shrink-0 shadow-sm">
+                          <Plus className="w-4 h-4" />
                         </span>
                       )}
                     </div>
@@ -1092,9 +1102,9 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
         </div>
 
-        {/* RIGHT CART — desktop */}
+        {/* CART — desktop (narrow left column, Odoo-style) */}
         <div
-          className="hidden lg:flex lg:col-span-6 bg-white rounded-xl border border-[#E1DFDD] shadow-xs flex-col overflow-hidden"
+          className="hidden lg:flex lg:col-span-3 lg:col-start-1 lg:row-start-1 bg-[#F8F8F8] rounded-lg border border-[#E1DFDD] shadow-xs flex-col overflow-hidden"
           style={{height: 'calc(100dvh - 8.5rem)', minHeight: '480px'}}
         >
           <div className="px-3 pt-3 pb-2 border-b border-[#F3F2F1] shrink-0 flex items-center gap-2">
@@ -1851,11 +1861,10 @@ export const POSView: React.FC<POSViewProps> = ({
                     printTraFiscalSlip(
                       lastTraReceipt,
                       taxSettings,
-                      {
-                        mobile: currentUser?.phone,
-                        serialNumber: efdSettings.deviceId || taxSettings.traEfdSerial,
+                      buildTraSlipMeta(efdSettings, taxSettings, {
+                        userPhone: currentUser?.phone,
                         datetimeIso: lastCompletedSale.date,
-                      },
+                      }),
                       isSw,
                     );
                   }}
@@ -1876,11 +1885,10 @@ export const POSView: React.FC<POSViewProps> = ({
                 <TraFiscalSlipPreview
                   receipt={lastTraReceipt}
                   tax={taxSettings}
-                  meta={{
-                    mobile: currentUser?.phone,
-                    serialNumber: efdSettings.deviceId || taxSettings.traEfdSerial,
+                  meta={buildTraSlipMeta(efdSettings, taxSettings, {
+                    userPhone: currentUser?.phone,
                     datetimeIso: lastCompletedSale.date,
-                  }}
+                  })}
                 />
               </div>
             </div>

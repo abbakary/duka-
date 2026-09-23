@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Settings, Save, RefreshCw } from 'lucide-react';
 import type { Language } from '@/types/v1';
-import type { EfdApiSettings } from '@/types/traReceipt';
+import type { EfdApiSettings, TraEfdCustomerIdTypeCode } from '@/types/traReceipt';
+import { DEFAULT_EFD_API_BASE } from '@/types/traReceipt';
 import { useTraReceipts } from '@/context/TraReceiptContext';
 import { TRA_CUSTOMER_ID_TYPES } from '@/lib/efdApi';
 
@@ -15,7 +16,7 @@ export const TraEfdApiSection: React.FC<TraEfdApiSectionProps> = ({
   sectionId = 'tra-efd-api',
 }) => {
   const isSw = language === 'sw';
-  const { efdSettings, saveEfdSettings, testConnection } = useTraReceipts();
+  const { efdSettings, saveEfdSettings, testConnection, configLoading } = useTraReceipts();
   const [draftEfd, setDraftEfd] = useState<EfdApiSettings>(efdSettings);
   const [testing, setTesting] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -25,17 +26,28 @@ export const TraEfdApiSection: React.FC<TraEfdApiSectionProps> = ({
   }, [efdSettings]);
 
   const handleSave = () => {
-    saveEfdSettings(draftEfd);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    void saveEfdSettings(draftEfd).then(() => {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      setDraftEfd(d => ({ ...d, clientSecret: '' }));
+    });
   };
 
   const handleTest = async () => {
     setTesting(true);
-    saveEfdSettings(draftEfd);
+    await saveEfdSettings(draftEfd);
     await testConnection();
     setTesting(false);
+    setDraftEfd(d => ({ ...d, clientSecret: '' }));
   };
+
+  const idTypeOptions: { value: TraEfdCustomerIdTypeCode; label: string }[] = [
+    { value: '1', label: 'TIN' },
+    { value: '5', label: 'NIDA' },
+    { value: '4', label: isSw ? 'Pasipoti' : 'Passport' },
+    { value: '2', label: isSw ? 'Leseni ya udereva' : 'Driving license' },
+    { value: '6', label: isSw ? 'Simu (mteja wa kawaida)' : 'Telephone (walk-in)' },
+  ];
 
   return (
     <div id={sectionId} className="space-y-4 scroll-mt-4">
@@ -47,9 +59,14 @@ export const TraEfdApiSection: React.FC<TraEfdApiSectionProps> = ({
           </h3>
           <p className="text-xs text-[#605E5C]">
             {isSw
-              ? 'Unganisha kifaa cha EFD au mtoa huduma wa VFD. Risiti za TRA zinatuma kupitia API hii.'
-              : 'Link your EFD device or VFD provider. TRA fiscal receipts submit through this API.'}
+              ? 'Weka Client ID na Secret kutoka mtoa huduma wa VEFD. Siri hazionyeshwi kwenye kivinjari — zinahifadhiwa kwenye seva.'
+              : 'Enter the VEFD Client ID and Secret from your provider. Secrets stay on the server — never in the browser.'}
           </p>
+          {configLoading && (
+            <p className="text-xs text-[#605E5C] animate-pulse">
+              {isSw ? 'Inapakia usanidi…' : 'Loading configuration…'}
+            </p>
+          )}
 
           <label className="flex items-center gap-2 text-sm font-semibold">
             <input
@@ -70,25 +87,99 @@ export const TraEfdApiSection: React.FC<TraEfdApiSectionProps> = ({
           </label>
 
           <div className="space-y-3">
-            {[
-              { key: 'apiBaseUrl' as const, label: 'API Base URL', placeholder: 'https://efd.example.com/api/v1' },
-              { key: 'apiKey' as const, label: 'API Key', placeholder: 'Bearer token or API key' },
-              { key: 'apiSecret' as const, label: 'API Secret', placeholder: 'Optional secret' },
-              { key: 'deviceId' as const, label: isSw ? 'Kitambulisho cha Kifaa' : 'Device ID', placeholder: 'EFD device serial' },
-              { key: 'zNumber' as const, label: 'Z Number', placeholder: 'Z report counter' },
-            ].map(field => (
-              <div key={field.key}>
-                <label className="text-[10px] font-bold uppercase text-[#605E5C]">{field.label}</label>
+            <div>
+              <label className="text-[10px] font-bold uppercase text-[#605E5C]">API Base URL</label>
+              <input
+                type="text"
+                value={draftEfd.apiBaseUrl}
+                onChange={e => setDraftEfd(d => ({ ...d, apiBaseUrl: e.target.value }))}
+                placeholder={DEFAULT_EFD_API_BASE}
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-[#E1DFDD] text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase text-[#605E5C]">Client ID</label>
+              <input
+                type="text"
+                value={draftEfd.clientId}
+                onChange={e => setDraftEfd(d => ({ ...d, clientId: e.target.value }))}
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-[#E1DFDD] text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase text-[#605E5C]">
+                Client Secret {efdSettings.hasClientSecret ? (isSw ? '(imehifadhiwa)' : '(stored)') : ''}
+              </label>
+              <input
+                type="password"
+                value={draftEfd.clientSecret}
+                onChange={e => setDraftEfd(d => ({ ...d, clientSecret: e.target.value }))}
+                placeholder={efdSettings.hasClientSecret ? (isSw ? 'Acha tupu kubaki' : 'Leave blank to keep') : ''}
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-[#E1DFDD] text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase text-[#605E5C]">
+                  {isSw ? 'Jiji / eneo' : 'City / location'}
+                </label>
                 <input
-                  type={field.key.includes('Secret') || field.key.includes('Key') ? 'password' : 'text'}
-                  value={draftEfd[field.key]}
-                  onChange={e => setDraftEfd(d => ({ ...d, [field.key]: e.target.value }))}
-                  placeholder={field.placeholder}
+                  type="text"
+                  value={draftEfd.companyCity}
+                  onChange={e => setDraftEfd(d => ({ ...d, companyCity: e.target.value }))}
+                  placeholder="DAR ES SALAAM"
                   className="w-full mt-1 px-3 py-2 rounded-lg border border-[#E1DFDD] text-sm"
                 />
               </div>
-            ))}
+              <div>
+                <label className="text-[10px] font-bold uppercase text-[#605E5C]">
+                  {isSw ? 'Simu ya duka' : 'Shop mobile'}
+                </label>
+                <input
+                  type="text"
+                  value={draftEfd.companyMobile}
+                  onChange={e => setDraftEfd(d => ({ ...d, companyMobile: e.target.value }))}
+                  className="w-full mt-1 px-3 py-2 rounded-lg border border-[#E1DFDD] text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase text-[#605E5C]">
+                {isSw ? 'Aina ya kitambulisho chaguo-msingi' : 'Default customer ID type'}
+              </label>
+              <select
+                value={draftEfd.defaultCustomerIdType}
+                onChange={e =>
+                  setDraftEfd(d => ({
+                    ...d,
+                    defaultCustomerIdType: e.target.value as TraEfdCustomerIdTypeCode,
+                  }))
+                }
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-[#E1DFDD] text-sm"
+              >
+                {idTypeOptions.map(o => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
+
+          {(efdSettings.companyVrn || efdSettings.companySerial) && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3 text-xs text-emerald-900 space-y-1">
+              <p className="font-bold">{isSw ? 'Wasifu wa kifaa (kutoka TRA)' : 'Device profile (from TRA)'}</p>
+              {efdSettings.companyVrn && <p>VRN: {efdSettings.companyVrn}</p>}
+              {efdSettings.companyTin && <p>TIN: {efdSettings.companyTin}</p>}
+              {efdSettings.companySerial && <p>{isSw ? 'Serial' : 'Serial'}: {efdSettings.companySerial}</p>}
+              {efdSettings.taxOffice && <p>{isSw ? 'Ofisi ya kodi' : 'Tax office'}: {efdSettings.taxOffice}</p>}
+              {efdSettings.connectionStatus === 'connected' && (
+                <p className="text-[10px] opacity-80">
+                  {efdSettings.tokenUserName || '—'} · {efdSettings.tokenEmail || '—'}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2 pt-2">
             <button
@@ -101,7 +192,7 @@ export const TraEfdApiSection: React.FC<TraEfdApiSectionProps> = ({
             </button>
             <button
               type="button"
-              disabled={testing || !draftEfd.apiBaseUrl.trim()}
+              disabled={testing || !draftEfd.clientId.trim()}
               onClick={() => void handleTest()}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#E1DFDD] text-sm font-semibold disabled:opacity-50"
             >

@@ -126,6 +126,35 @@ export function filterByBranchId<T extends { branchId?: string }>(
   });
 }
 
+/** Branch filter with HQ fallback for legacy rows missing branch_id. */
+export function filterByActiveBranch<T extends { branchId?: string }>(
+  items: T[],
+  branchId: string | null | undefined,
+  branches: StoreBranch[],
+): T[] {
+  return filterByBranchId(items, branchId, resolveDefaultBranchId(branches));
+}
+
+/** Staff rows: branch_id, or legacy branch name, or tenant-wide HQ assignees. */
+export function filterStaffByBranch(
+  staff: StaffMember[],
+  branchId: string | null | undefined,
+  branches: StoreBranch[],
+): StaffMember[] {
+  if (!branchId || branchId === 'all') return staff;
+  const hqBranchId = resolveDefaultBranchId(branches);
+  const activeName = branches.find(b => b.id === branchId)?.name?.trim().toLowerCase();
+  return staff.filter(s => {
+    if (s.branchId) return s.branchId === branchId;
+    const label = s.branch?.trim().toLowerCase();
+    if (label && activeName && label === activeName) return true;
+    if (label && hqBranchId && branchId === hqBranchId && (label === 'hq' || label.includes('makao'))) {
+      return true;
+    }
+    return hqBranchId != null && branchId === hqBranchId && !s.branchId && !label;
+  });
+}
+
 /** Client-side guard — never show another branch's operational rows. */
 export function scopeSnapshotByBranch(
   data: ApiSyncResult,
@@ -143,6 +172,8 @@ export function scopeSnapshotByBranch(
     stockMovements: data.stockMovements.filter(m => productIds.has(m.productId)),
     events: filterByBranchId(data.events, branchId, hqBranchId),
     purchaseOrders: filterPurchaseOrdersByBranch(data.purchaseOrders, branchId, productIds),
+    staff: filterStaffByBranch(data.staff, branchId, data.branches),
+    expenses: filterByBranchId(data.expenses, branchId, hqBranchId),
   };
 }
 
@@ -171,10 +202,14 @@ export async function fetchProductsFromApi(
   return withProductImageCache(tenantId, mapped);
 }
 
-export async function fetchCustomersFromApi(branchId?: string | null): Promise<Customer[]> {
+export async function fetchCustomersFromApi(
+  branchId?: string | null,
+  branches?: StoreBranch[],
+): Promise<Customer[]> {
   const raw = await api.getAllCustomers(branchId);
   const mapped = (raw as Array<Record<string, unknown>>).map(mapCustomer);
-  return filterByBranchId(mapped, branchId);
+  const hqBranchId = branches?.length ? resolveDefaultBranchId(branches) : undefined;
+  return filterByBranchId(mapped, branchId, hqBranchId);
 }
 
 /** Keep local POS-created rows until the server returns the same phone/id. */
@@ -182,12 +217,14 @@ export function mergeCustomersFromApi(
   existing: Customer[],
   fromApi: Customer[],
   branchId?: string | null,
+  hqBranchId?: string | null,
 ): Customer[] {
-  const scopedApi = filterByBranchId(fromApi, branchId);
+  const scopedApi = filterByBranchId(fromApi, branchId, hqBranchId);
   const apiIds = new Set(scopedApi.map(c => c.id));
   const apiPhones = new Set(scopedApi.map(c => c.phone.replace(/\s/g, '')));
   const pendingLocal = existing.filter(c => {
     if (branchId && c.branchId && c.branchId !== branchId) return false;
+    if (branchId && !c.branchId && hqBranchId && branchId !== hqBranchId) return false;
     if (apiIds.has(c.id)) return false;
     const normalized = c.phone.replace(/\s/g, '');
     if (apiPhones.has(normalized)) return false;
@@ -269,6 +306,7 @@ export function mapExpense(e: Record<string, unknown>): ExpenseItem {
   const dt = String(e.expense_date ?? '');
   return {
     id: e.id as string,
+    branchId: (e.branch_id as string) ?? undefined,
     date: dt.slice(0, 10),
     time: dt.length > 10 ? dt.slice(11, 16) : '09:00',
     title: e.title as string,
@@ -327,6 +365,11 @@ const DEFAULT_STAFF_PERMISSIONS: Record<StaffRole, StaffPermissions> = {
     canViewProfitReports: true, canManageSuppliers: true, canApproveDiscounts: false,
     canOverridePrices: false, canVoidReceipts: false, canPerformDailyClosing: true, canAccessSuperAdmin: false,
   },
+  HR: {
+    canSellPOS: false, canGiveCredit: false, canModifyInventory: false, canViewInventory: true,
+    canViewProfitReports: true, canManageSuppliers: false, canApproveDiscounts: false,
+    canOverridePrices: false, canVoidReceipts: false, canPerformDailyClosing: false, canAccessSuperAdmin: false,
+  },
 };
 
 export function resolveStaffPermissions(
@@ -341,6 +384,13 @@ export function resolveStaffPermissions(
 export function mapStaff(s: Record<string, unknown>): StaffMember {
   const role = (s.role as StaffMember['role']) ?? 'Cashier';
   const branchName = (s.branch_name as string) ?? undefined;
+  const perms = s.permissions as Record<string, unknown> | undefined;
+  const rawAvatar =
+    (typeof s.avatar_url === 'string' && s.avatar_url) ||
+    (typeof perms?.avatar_url === 'string' && perms.avatar_url) ||
+    undefined;
+  const avatarFromApi =
+    rawAvatar && !rawAvatar.includes('images.unsplash.com') ? rawAvatar : undefined;
   return {
     id: s.id as string,
     name: s.name as string,
@@ -351,6 +401,12 @@ export function mapStaff(s: Record<string, unknown>): StaffMember {
     joinedDate: new Date().toISOString().slice(0, 10),
     branch: branchName ?? 'HQ',
     branchId: (s.branch_id as string) ?? undefined,
+    avatarUrl: avatarFromApi,
+    nssfNumber:
+      (s.nssf_number as string) ??
+      (perms?.nssf_number as string) ??
+      (perms?.payroll_nssf as string) ??
+      undefined,
     shift: 'Day',
     todaySalesCount: 0,
     todayRevenueTzs: 0,
@@ -490,7 +546,10 @@ export function mapAdminTenant(t: Record<string, unknown>): TenantStore {
   };
 }
 
-export async function syncTenantFromApi(branchId?: string | null): Promise<ApiSyncResult | null> {
+export async function syncTenantFromApi(
+  branchId?: string | null,
+  imageTenantId?: string | null,
+): Promise<ApiSyncResult | null> {
   try {
     const profile = await api.getTenantProfile();
     const [
@@ -509,9 +568,9 @@ export async function syncTenantFromApi(branchId?: string | null): Promise<ApiSy
       api.getAllCustomers(branchId),
       api.getSuppliers(),
       api.getBranches(),
-      api.getExpenses(),
+      api.getExpenses(branchId),
       api.getCalendarEvents(branchId),
-      api.getStaff(),
+      api.getStaff(branchId),
       api.getPurchaseOrders(branchId),
       api.getAllSales(branchId),
       api.getStockMovements(),
@@ -533,6 +592,7 @@ export async function syncTenantFromApi(branchId?: string | null): Promise<ApiSy
 
     let products = productsRaw.map(mapProduct);
     const tenantKey =
+      (imageTenantId && String(imageTenantId).trim()) ||
       String((profile as Record<string, unknown>).tenant_id ?? '') ||
       String((profile as Record<string, unknown>).id ?? '') ||
       '';
@@ -723,7 +783,19 @@ export function supplierToApiPayload(s: Partial<Supplier> & { name: string }) {
   };
 }
 
-export function expenseToApiPayload(e: { title: string; category: string; amount: number; paymentMethod?: string; recipient?: string; notes?: string }) {
+export function expenseToApiPayload(
+  e: {
+    title: string;
+    category: string;
+    amount: number;
+    paymentMethod?: string;
+    recipient?: string;
+    notes?: string;
+    branchId?: string;
+  },
+  branchId?: string | null,
+) {
+  const resolvedBranch = branchId && branchId !== 'all' ? branchId : e.branchId;
   return {
     title: e.title,
     category: e.category,
@@ -731,6 +803,7 @@ export function expenseToApiPayload(e: { title: string; category: string; amount
     payment_method: e.paymentMethod,
     recipient: e.recipient,
     notes: e.notes,
+    ...(resolvedBranch ? { branch_id: resolvedBranch } : {}),
   };
 }
 
