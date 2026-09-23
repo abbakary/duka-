@@ -1,14 +1,9 @@
-import React from 'react';
-import { ShieldCheck, BarChart3, ChevronRight, Link2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShieldCheck, BarChart3, ChevronRight, ChevronDown } from 'lucide-react';
 import type { Language } from '@/types/v1';
 import { useTaxCompliance } from '@/context/TaxComplianceContext';
 import { TraTaxConfigurationBlock } from '@/components/v1/tra/TraTaxConfigurationBlock';
 import { TraEfdApiSection } from '@/components/v1/tra/TraEfdApiSection';
-
-const SETUP_SECTIONS = [
-  { id: 'tra-tax-mode', labelEn: '1 · Tax mode', labelSw: '1 · Hali ya kodi' },
-  { id: 'tra-efd-api', labelEn: '2 · EFD connection', labelSw: '2 · Muunganisho EFD' },
-] as const;
 
 export const DUKA_REPORTS_HUB_KEY = 'duka_reports_hub';
 
@@ -28,23 +23,20 @@ export const TraEfdSetupView: React.FC<TraEfdSetupViewProps> = ({
 }) => {
   const isSw = language === 'sw';
   const { settings: taxSettings } = useTaxCompliance();
-
-  const scrollToSection = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  const [efdOpen, setEfdOpen] = useState(false);
 
   const modeLabel =
     taxSettings.mode === 'tra_efd'
       ? isSw
-        ? 'TRA EFD imewashwa'
-        : 'TRA EFD active'
+        ? 'TRA EFD'
+        : 'TRA EFD'
       : taxSettings.mode === 'non_vat'
         ? isSw
-          ? 'Sio msajili wa VAT'
+          ? 'Haijasajiliwa VAT'
           : 'Not VAT registered'
         : isSw
-          ? 'VAT manual'
-          : 'Manual VAT';
+          ? 'VAT (ndani)'
+          : 'VAT (manual)';
 
   const openReports = () => {
     if (typeof sessionStorage !== 'undefined') {
@@ -54,61 +46,79 @@ export const TraEfdSetupView: React.FC<TraEfdSetupViewProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 max-w-3xl">
       <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs p-4 sm:p-5">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#E65100]">
               <ShieldCheck className="w-4 h-4" />
-              {isSw ? 'Usanidi TRA & EFD' : 'TRA & EFD configuration'}
+              {isSw ? 'Usanidi TRA' : 'TRA setup'}
             </div>
             <h2 className="text-lg font-bold text-[#323130] mt-1">
               {businessName || taxSettings.receiptBusinessName || (isSw ? 'Duka lako' : 'Your shop')}
             </h2>
-            <p className="text-xs text-[#605E5C] mt-1">
-              {modeLabel}
-              {tinNumber || taxSettings.tinNumber ? ` · TIN ${tinNumber || taxSettings.tinNumber}` : ''}
-            </p>
-            <p className="text-xs text-[#605E5C] mt-2 max-w-xl">
+            <p className="text-sm text-[#605E5C] mt-1">
               {isSw
-                ? 'Weka hali ya kodi na Client ID/Secret ya VEFD hapa. Risiti na ripoti za TRA ziko chini ya Fedha → Ripoti.'
-                : 'Set tax mode and VEFD Client ID/secret here. TRA receipts and fiscal reports live under Finance → Reports.'}
+                ? 'Chagua aina ya duka, kisha fungua kadi ili kuendelea — usionyeshe mipangilio yote mara moja.'
+                : 'Pick your shop type, then open one card to continue — no long form on one screen.'}
             </p>
           </div>
           {onOpenTraReports && (
             <button
               type="button"
               onClick={openReports}
-              className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0F2347] text-white text-xs font-bold hover:brightness-110 cursor-pointer"
+              className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#0F2347]/20 bg-[#0F2347]/5 text-[#0F2347] text-xs font-bold hover:bg-[#0F2347]/10 cursor-pointer"
             >
               <BarChart3 className="w-4 h-4" />
-              {isSw ? 'Ripoti & risiti TRA' : 'TRA reports & receipts'}
-              <ChevronRight className="w-4 h-4 opacity-80" />
+              {isSw ? 'Ripoti TRA' : 'TRA reports'}
+              <ChevronRight className="w-4 h-4 opacity-70" />
             </button>
           )}
         </div>
+        <p className="mt-3 text-xs font-semibold text-[#323130] inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#FAF9F8] border border-[#EDEBE9]">
+          {isSw ? 'Hali ya sasa:' : 'Current:'}{' '}
+          <span className="text-[#E65100]">{modeLabel}</span>
+          {tinNumber || taxSettings.tinNumber ? (
+            <span className="text-[#605E5C] font-normal">· TIN {tinNumber || taxSettings.tinNumber}</span>
+          ) : null}
+        </p>
       </div>
 
-      <nav className="flex flex-wrap gap-2 sticky top-0 z-10 bg-[#FAF9F8]/95 backdrop-blur-sm border border-[#E1DFDD] rounded-xl p-2 shadow-xs">
-        <span className="text-[10px] font-bold uppercase text-[#605E5C] px-2 py-1.5 self-center flex items-center gap-1">
-          <Link2 className="w-3 h-3" />
-          {isSw ? 'Hatua:' : 'Steps:'}
-        </span>
-        {SETUP_SECTIONS.map(s => (
+      <TraTaxConfigurationBlock
+        language={language}
+        businessName={businessName}
+        tinNumber={tinNumber}
+        layout="progressive"
+      />
+
+      {taxSettings.mode === 'tra_efd' && (
+        <div className="bg-white rounded-xl border border-[#E1DFDD] shadow-xs overflow-hidden">
           <button
-            key={s.id}
             type="button"
-            onClick={() => scrollToSection(s.id)}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-[#EDEBE9] hover:border-[#E65100]/40 hover:text-[#E65100] text-[#323130] cursor-pointer"
+            onClick={() => setEfdOpen(o => !o)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-4 text-left cursor-pointer hover:bg-[#FAF9F8]"
           >
-            {isSw ? s.labelSw : s.labelEn}
+            <div>
+              <p className="text-sm font-bold text-[#323130]">
+                {isSw ? 'Hatua 2 · Muunganisho wa EFD (TRA)' : 'Step 2 · EFD connection (TRA)'}
+              </p>
+              <p className="text-xs text-[#605E5C] mt-0.5">
+                {isSw
+                  ? 'Client ID na Secret — fungua tu ikiwa tayari umesajili EFD.'
+                  : 'Client ID & secret — open only when you are ready to connect EFD.'}
+              </p>
+            </div>
+            <ChevronDown
+              className={`w-5 h-5 text-[#605E5C] shrink-0 transition-transform ${efdOpen ? 'rotate-180' : ''}`}
+            />
           </button>
-        ))}
-      </nav>
-
-      <TraTaxConfigurationBlock language={language} businessName={businessName} tinNumber={tinNumber} />
-
-      <TraEfdApiSection language={language} />
+          {efdOpen && (
+            <div className="px-4 pb-4 border-t border-[#EDEBE9] pt-4">
+              <TraEfdApiSection language={language} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

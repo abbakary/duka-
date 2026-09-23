@@ -54,6 +54,7 @@ import { ComplianceTrustPanel } from '@/components/v1/ComplianceTrustPanel';
 import { DocumentTemplatesView } from '@/components/v1/DocumentTemplatesView';
 import { BrandThemePanel } from '@/components/v1/BrandThemePanel';
 import { SettingsSectionNav } from '@/components/v1/SettingsSectionNav';
+import { isMobileAppClient } from '@/lib/isMobileApp';
 import { canManageStaffRBAC } from '@/lib/rbac';
 import { useSaasPlans } from '@/context/SaasPlansContext';
 import { usePlatformBilling } from '@/context/PlatformBillingContext';
@@ -108,17 +109,24 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
   const activePlan = catalog.find(p => p.tier === currentPlanTier) ?? catalog[0] ?? DEFAULT_PUBLIC_PLANS[0];
   const paymentStatus = derivePaymentStatus(subscriptionExpiry, 'active', billingSettings.graceDays);
   const canManageTeam = canManageStaffRBAC(currentUser);
+  const mobileClient = useMemo(() => isMobileAppClient(), []);
   const [activeTab, setActiveTab] = useState<'profile' | 'branding' | 'team' | 'branches' | 'compliance' | 'documents' | 'billing'>('profile');
 
-  const settingsNavItems = [
-    { id: 'profile', labelEn: 'Profile', labelSw: 'Wasifu', icon: <Store className="w-3.5 h-3.5" /> },
-    { id: 'branding', labelEn: 'Logo & Colors', labelSw: 'Nembo & Rangi', icon: <Palette className="w-3.5 h-3.5" /> },
-    { id: 'team', labelEn: 'People & HR', labelSw: 'Watu & HR', icon: <Users className="w-3.5 h-3.5" />, managerOnly: true },
-    { id: 'compliance', labelEn: 'TRA setup', labelSw: 'Usanidi TRA', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
-    { id: 'documents', labelEn: 'Documents', labelSw: 'Hati', icon: <FileText className="w-3.5 h-3.5" /> },
-    { id: 'billing', labelEn: 'Plan', labelSw: 'Malipo', icon: <CreditCard className="w-3.5 h-3.5" /> },
-    { id: 'branches', labelEn: 'Branches', labelSw: 'Matawi', icon: <Building2 className="w-3.5 h-3.5" />, managerOnly: true },
-  ].filter(tab => !tab.managerOnly || canManageTeam);
+  const settingsNavItems = useMemo(
+    () =>
+      [
+        { id: 'profile', labelEn: 'Profile', labelSw: 'Wasifu', icon: <Store className="w-3.5 h-3.5" /> },
+        { id: 'branding', labelEn: 'Logo & Colors', labelSw: 'Nembo & Rangi', icon: <Palette className="w-3.5 h-3.5" /> },
+        { id: 'team', labelEn: 'People & HR', labelSw: 'Watu & HR', icon: <Users className="w-3.5 h-3.5" />, managerOnly: true },
+        { id: 'compliance', labelEn: 'TRA setup', labelSw: 'Usanidi TRA', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+        { id: 'documents', labelEn: 'Documents', labelSw: 'Hati', icon: <FileText className="w-3.5 h-3.5" /> },
+        { id: 'billing', labelEn: 'Plan', labelSw: 'Malipo', icon: <CreditCard className="w-3.5 h-3.5" /> },
+        { id: 'branches', labelEn: 'Branches', labelSw: 'Matawi', icon: <Building2 className="w-3.5 h-3.5" />, managerOnly: true },
+      ]
+        .filter(tab => !tab.managerOnly || canManageTeam)
+        .filter(tab => !(mobileClient && tab.id === 'compliance')),
+    [canManageTeam, mobileClient],
+  );
 
   // Internal or external staff list
   const [internalStaffList, setInternalStaffList] = useState<StaffMember[]>([]);
@@ -340,6 +348,12 @@ export const AccountSettingsView: React.FC<AccountSettingsViewProps> = ({
       setActiveTab('profile');
     }
   }, [canManageTeam, activeTab]);
+
+  useEffect(() => {
+    if (mobileClient && activeTab === 'compliance') {
+      setActiveTab('profile');
+    }
+  }, [mobileClient, activeTab]);
 
   // Filtered staff list
   const filteredStaff = staffWithTodaySales.filter(s => {

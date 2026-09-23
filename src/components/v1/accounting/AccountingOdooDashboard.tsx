@@ -63,10 +63,8 @@ export const AccountingOdooDashboard: React.FC<AccountingOdooDashboardProps> = (
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <p className="text-sm text-[#3d5c4a] max-w-2xl">
-          {isSw
-            ? 'Dashibodi ya uhasibu — ankara za wateja, bili za wasambazaji, benki, na TRA/VAT katika mwonekano mmoja.'
-            : 'Accounting dashboard — customer invoices, vendor bills, bank, cash, and TRA/VAT in one workspace.'}
+        <p className="text-sm text-[#3d5c4a] max-w-xl">
+          {isSw ? 'Gonga kadi ili kufungua kazi moja.' : 'Tap a card to open one task.'}
         </p>
         <button
           type="button"

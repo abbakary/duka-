@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Bell, MessageCircle, Send, Smartphone } from 'lucide-react';
+import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { Language, PlatformBroadcast, TenantStore } from '@/types/v1';
 import { derivePaymentStatus, paymentStatusLabel } from '@/lib/saasPlans';
 import { usePlatformBilling } from '@/context/PlatformBillingContext';
@@ -118,12 +119,14 @@ export const SuperAdminRemindersView: React.FC<Props> = ({
           <div>
             <p className="text-[11px] font-bold text-slate-500 mb-2">{isSw ? 'Njia' : 'Channel'}</p>
             <div className="flex flex-wrap gap-2">
-              {([
-                ['in_app', Smartphone, isSw ? 'Ndani ya app' : 'In-app'],
-                ['sms', MessageCircle, 'SMS'],
-                ['whatsapp', MessageCircle, 'WhatsApp'],
-                ['both', Send, isSw ? 'Zote' : 'All'],
-              ] as const).map(([id, Icon, label]) => (
+              {(
+                [
+                  { id: 'in_app' as const, Icon: Smartphone, label: isSw ? 'Ndani ya app' : 'In-app' },
+                  { id: 'sms' as const, Icon: MessageCircle, label: 'SMS' },
+                  { id: 'whatsapp' as const, Icon: WhatsAppIcon, label: 'WhatsApp' },
+                  { id: 'both' as const, Icon: Send, label: isSw ? 'Zote' : 'All' },
+                ] as const
+              ).map(({ id, Icon, label }) => (
                 <button
                   key={id}
                   type="button"

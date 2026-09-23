@@ -230,9 +230,9 @@ export const AccountingHubView: React.FC<AccountingHubViewProps> = ({
   };
 
   const mainTabs: { id: MainMode; label: string; icon: React.ReactNode }[] = [
-    { id: 'dashboard', label: isSw ? 'Dashibodi' : 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'reporting', label: isSw ? 'Ripoti' : 'Reporting', icon: <FileText className="w-4 h-4" /> },
-    { id: 'operations', label: isSw ? 'Vitabu' : 'Journals', icon: <BookOpen className="w-4 h-4" /> },
+    { id: 'dashboard', label: isSw ? 'Muhtasari' : 'Overview', icon: <LayoutDashboard className="w-4 h-4" /> },
+    { id: 'reporting', label: isSw ? 'Ripoti' : 'Reports', icon: <FileText className="w-4 h-4" /> },
+    { id: 'operations', label: isSw ? 'Vitabu (juu)' : 'Advanced', icon: <BookOpen className="w-4 h-4" /> },
   ];
 
   const opsTabs: { id: OpsTab; label: string; icon: React.ReactNode }[] = [
@@ -253,47 +253,26 @@ export const AccountingHubView: React.FC<AccountingHubViewProps> = ({
               {isSw ? 'Uhasibu' : 'Accounting'}
             </div>
             <h2 className="text-xl font-bold text-[#1a3d2e] mt-1">
-              {isSw ? 'Kituo cha uhasibu' : 'Accounting workspace'}
+              {isSw ? 'Fedha' : 'Finance'}
             </h2>
-            <p className="text-sm text-[#5a7a68] mt-1 max-w-2xl leading-relaxed">
+            <p className="text-sm text-[#5a7a68] mt-1 max-w-xl">
               {isSw
-                ? 'Dashibodi ya majarida, ripoti za kifedha, TRA/VAT, na vitabu vya shuaraba — data kutoka POS, stoo, na matumizi yako.'
-                : 'Journal dashboard, financial statements, TRA/VAT books, and double-entry journals — powered by your POS, stock, and expenses.'}
-              {(dataSource === 'bundle' || dataSource === 'operational-api') && (
-                <span className="block text-[11px] text-[#107C10] font-semibold mt-1">
-                  {dataSource === 'bundle'
-                    ? isSw
-                      ? 'Ripoti kamili kutoka API ya uhasibu'
-                      : 'Full accounting reports from API'
-                    : isSw
-                      ? 'Data hai kutoka API ya biashara'
-                      : 'Live operational data from API'}
-                </span>
-              )}
+                ? 'Angalia muhtasari, fungua ripoti unazohitaji, au vitabu vya uhasibu — hatua moja kwa wakati.'
+                : 'See a summary, open the report you need, or bookkeeping — one step at a time.'}
             </p>
+            {(dataSource === 'bundle' || dataSource === 'operational-api') && (
+              <p className="text-[11px] text-[#107C10] font-semibold mt-1">
+                {dataSource === 'bundle'
+                  ? isSw
+                    ? 'Data kutoka API ya uhasibu'
+                    : 'Data from accounting API'
+                  : isSw
+                    ? 'Data hai kutoka biashara yako'
+                    : 'Live data from your shop'}
+              </p>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div className="inline-flex rounded-lg border border-[#d4e8dc] p-0.5 bg-[#f5faf7]">
-              <button
-                type="button"
-                onClick={() => setBooksMode('standard')}
-                className={`px-3 py-2 rounded-md text-xs font-bold cursor-pointer ${
-                  booksMode === 'standard' ? 'bg-white shadow-sm text-[#1a3d2e]' : 'text-[#5a7a68]'
-                }`}
-              >
-                {isSw ? 'Vitabu vya kawaida' : 'Standard books'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setBooksMode('tra')}
-                className={`px-3 py-2 rounded-md text-xs font-bold inline-flex items-center gap-1 cursor-pointer ${
-                  booksMode === 'tra' ? 'bg-[#107C10] text-white shadow-sm' : 'text-[#5a7a68]'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                TRA / VAT
-              </button>
-            </div>
             <button
               type="button"
               onClick={() => {
@@ -340,16 +319,33 @@ export const AccountingHubView: React.FC<AccountingHubViewProps> = ({
               {t.label}
             </button>
           ))}
-          {onNavigateToPayroll ? (
-            <button
-              type="button"
-              onClick={onNavigateToPayroll}
-              className="ml-auto inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold text-[#714b67] hover:bg-white/80 cursor-pointer"
-            >
-              {isSw ? 'Mishahara & PAYE →' : 'Payroll & PAYE →'}
-            </button>
-          ) : null}
         </div>
+        {mainMode === 'reporting' && vatRegistered && (
+          <p className="mt-3 text-xs text-[#5a7a68] flex flex-wrap items-center gap-2">
+            {isSw ? 'Vitabu vya ripoti:' : 'Report books:'}
+            <span className="inline-flex rounded-lg border border-[#d4e8dc] p-0.5 bg-[#f5faf7]">
+              <button
+                type="button"
+                onClick={() => setBooksMode('standard')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                  booksMode === 'standard' ? 'bg-white shadow-sm text-[#1a3d2e]' : 'text-[#5a7a68]'
+                }`}
+              >
+                {isSw ? 'Kawaida' : 'Standard'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setBooksMode('tra')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer ${
+                  booksMode === 'tra' ? 'bg-[#107C10] text-white' : 'text-[#5a7a68]'
+                }`}
+              >
+                <ShieldCheck className="w-3 h-3" />
+                TRA
+              </button>
+            </span>
+          </p>
+        )}
       </div>
 
       {infoMessage && (

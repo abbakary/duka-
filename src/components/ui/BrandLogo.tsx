@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { BRAND_ALT, BRAND_LOGO_URL } from '@/lib/brandAssets';
 
 interface BrandLogoProps {
   className?: string;
@@ -7,11 +8,11 @@ interface BrandLogoProps {
   alt?: string;
 }
 
-/** DukaMkononi brand mark from `/public/brand_logo.png`. */
-export function BrandLogo({ className, height = 40, alt = 'DukaMkononi' }: BrandLogoProps) {
+/** Duka+ brand mark (`src/assets/duka+logo.png`). */
+export function BrandLogo({ className, height = 40, alt = BRAND_ALT }: BrandLogoProps) {
   return (
     <img
-      src="/brand_logo.png"
+      src={BRAND_LOGO_URL}
       alt={alt}
       className={cn('object-contain object-left', className)}
       style={{ height, width: 'auto', maxWidth: height * 5.5 }}
@@ -26,13 +27,13 @@ interface BrandMarkProps {
   alt?: string;
 }
 
-/** Square-ish favicon-style mark for tight spaces (uses same asset, cover crop). */
-export function BrandMark({ className, size = 40, alt = 'DukaMkononi' }: BrandMarkProps) {
+/** Square app-icon style mark for headers and tight spaces. */
+export function BrandMark({ className, size = 40, alt = BRAND_ALT }: BrandMarkProps) {
   return (
     <img
-      src="/brand_logo.png"
+      src={BRAND_LOGO_URL}
       alt={alt}
-      className={cn('object-cover rounded-xl', className)}
+      className={cn('object-contain rounded-xl', className)}
       style={{ width: size, height: size }}
       draggable={false}
     />

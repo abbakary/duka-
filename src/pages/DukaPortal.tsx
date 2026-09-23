@@ -68,6 +68,8 @@ import { CustomersCRMView } from '@/components/v1/CustomersCRMView';
 import { ReceivablesPayablesView } from '@/components/v1/ReceivablesPayablesView';
 import { BranchManagementView } from '@/components/v1/BranchManagementView';
 import { AdvancedCalendarView } from '@/components/v1/AdvancedCalendarView';
+import { VendorOnboardingShowcase } from '@/components/v1/onboarding/VendorOnboardingShowcase';
+import { markOnboardingPending, shouldShowOnboarding } from '@/lib/onboardingShowcaseCards';
 import { POSView } from '@/components/v1/POSView';
 import { InventoryView } from '@/components/v1/InventoryView';
 import { SuppliersView } from '@/components/v1/SuppliersView';
@@ -207,6 +209,7 @@ export default function DukaPortal() {
   const [isAIChatOpen, setIsAIChatOpen] = useState<boolean>(false);
   const [aiInitialPrompt, setAiInitialPrompt] = useState<string | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showOnboardingShowcase, setShowOnboardingShowcase] = useState(false);
 
   // Super Admin / Provider specific state
   const [tenants, setTenants] = useState<TenantStore[]>(EMPTY_TENANTS);
@@ -774,6 +777,12 @@ export default function DukaPortal() {
       }
       if (user.subscriptionExpiry) setSubscriptionExpiry(user.subscriptionExpiry);
       else if (user.plan) setCurrentPlanTier(user.plan);
+      if (options?.fromRegistration) {
+        markOnboardingPending(tid);
+        setShowOnboardingShowcase(true);
+      } else if (shouldShowOnboarding(tid)) {
+        setShowOnboardingShowcase(true);
+      }
       setActiveTab(options?.fromRegistration ? getDefaultWorkplaceTab(bt) : 'dashboard');
     }
   };
@@ -1479,6 +1488,15 @@ export default function DukaPortal() {
       tenantId={vendorTenantApiId}
       businessName={businessName || currentUser?.businessName}
     >
+    {showOnboardingShowcase && currentUser && tenantStorageId && (
+      <VendorOnboardingShowcase
+        language={language}
+        tenantId={tenantStorageId}
+        businessName={businessName || currentUser.businessName}
+        onNavigate={tab => setActiveTab(tab)}
+        onDismiss={() => setShowOnboardingShowcase(false)}
+      />
+    )}
     {/* ─── FULL-SCREEN POS MODE: no sidebar, no header ─────────────────────── */}
     {activeTab === 'pos' && !isSuperAdminMode && !vendorAccessBlocked && (
       <div className="fixed inset-0 z-50 bg-[#F5F5F5] font-sans overflow-hidden flex flex-col">

@@ -26,6 +26,9 @@ import { getTranslation } from '@/utils/translations';
 import { ActionBar } from '@/components/v1/ActionBar';
 import confetti from 'canvas-confetti';
 import { api } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/apiConfig';
+import { formatApiError } from '@/lib/formatApiError';
+import { dayCellBackground, formatMonthYear, todayYmd, ymdFromParts } from '@/lib/calendarDayStyle';
 import { mapEvent, eventToApiPayload, filterByActiveBranch } from '@/lib/apiSync';
 import type { StoreBranch } from '@/types/v1';
 
@@ -61,7 +64,9 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
     [events, activeBranchId, branches],
   );
 
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 7, 28)); // August 2026
+  const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [syncing, setSyncing] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [calendarView, setCalendarView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(branchEvents[0] || null);
@@ -78,7 +83,7 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
   const [newEvent, setNewEvent] = useState({
     title: '',
     category: 'delivery' as CalendarEventCategory,
-    date: '2026-08-29',
+    date: todayYmd(),
     time: '10:00 AM',
     priority: 'high' as 'high' | 'medium' | 'low',
     description: '',
@@ -96,7 +101,26 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
 
   const prevMonth = () => setCurrentDate(new Date(currentYear, currentMonth - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(currentYear, currentMonth + 1, 1));
-  const goToToday = () => setCurrentDate(new Date(2026, 7, 28));
+  const goToToday = () => setCurrentDate(new Date());
+
+  const reloadFromApi = async () => {
+    if (!api.hasValidSession()) return;
+    setSyncing(true);
+    setLoadError('');
+    try {
+      const raw = await api.getCalendarEvents(activeBranchId);
+      setEvents((raw as Array<Record<string, unknown>>).map(mapEvent));
+    } catch (err) {
+      setLoadError(formatApiError(err, isSw));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    void reloadFromApi();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- branch scope only
+  }, [activeBranchId]);
 
   // Category Color Map & Icons
   const getCategoryConfig = (category: CalendarEventCategory) => {
@@ -172,7 +196,11 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
   const handleAISmartSchedule = async () => {
     setIsAIScheduling(true);
     try {
-      const res = await fetch('/api/ai/smart-schedule', {
+      const apiBase = getApiBaseUrl();
+      const aiUrl = apiBase.startsWith('/')
+        ? '/api/ai/smart-schedule'
+        : `${apiBase.replace(/\/api\/v1\/?$/, '')}/api/ai/smart-schedule`;
+      const res = await fetch(aiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -199,11 +227,22 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
     }
   };
 
-  // Calculate days for August 2026
-  const daysInMonth = 31;
-  const firstDayIndex = 6; // Saturday Aug 1, 2026
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const blanksArray = Array.from({ length: firstDayIndex }, (_, i) => i);
+  const today = todayYmd();
+
+  const handleDeleteEvent = async (eventId: string) => {
+    if (!window.confirm(isSw ? 'Futa tukio hili?' : 'Delete this event?')) return;
+    try {
+      await api.deleteCalendarEvent(eventId);
+      setEvents(prev => prev.filter(e => e.id !== eventId));
+      if (selectedEvent?.id === eventId) setSelectedEvent(null);
+    } catch (err) {
+      alert(formatApiError(err, isSw));
+    }
+  };
 
   return (
     <div className="space-y-5 pb-12">
@@ -230,6 +269,15 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
               <span>{isAIScheduling ? 'AI Scheduling...' : t('aiScheduleBtn')}</span>
             </button>
             <button
+              type="button"
+              onClick={() => void reloadFromApi()}
+              disabled={syncing}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#d4e8dc] bg-white text-xs font-semibold text-[#1a3d2e] cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+              {isSw ? 'Sawazisha' : 'Sync'}
+            </button>
+            <button
               id="btn-create-event-top"
               onClick={() => setIsCreatingEvent(!isCreatingEvent)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#6264A7] hover:bg-[#555793] text-white text-xs font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
@@ -240,6 +288,10 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
           </>
         }
       />
+
+      {loadError && (
+        <div className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{loadError}</div>
+      )}
 
       {/* FULL WIDTH ACTION BAR */}
       <ActionBar
@@ -395,8 +447,8 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
-          <h3 className="text-base font-bold text-[#323130] min-w-[140px]">
-            {monthNames[currentMonth]} {currentYear}
+          <h3 className="text-base font-bold text-[#323130] min-w-[140px] capitalize">
+            {formatMonthYear(currentDate, isSw)}
           </h3>
         </div>
 
@@ -471,9 +523,9 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
 
                 {/* Days of August 2026 */}
                 {daysArray.map(day => {
-                  const dateStr = `2026-08-${String(day).padStart(2, '0')}`;
+                  const dateStr = ymdFromParts(currentYear, currentMonth, day);
                   const dayEvents = filteredEvents.filter(e => e.date === dateStr);
-                  const isToday = day === 28;
+                  const isToday = dateStr === today;
 
                   return (
                     <div
@@ -481,8 +533,9 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
                       onClick={() => {
                         if (dayEvents.length > 0) setSelectedEvent(dayEvents[0]);
                       }}
+                      style={{ background: dayCellBackground(dayEvents) }}
                       className={`min-h-[100px] p-1.5 transition-colors flex flex-col justify-between group cursor-pointer ${
-                        isToday ? 'bg-[#F0F2FA] font-bold ring-1 ring-inset ring-[#6264A7]' : 'hover:bg-[#F8F8F8]'
+                        isToday ? 'font-bold ring-2 ring-inset ring-[#6264A7] shadow-inner' : 'hover:brightness-[0.98]'
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -644,17 +697,25 @@ export const AdvancedCalendarView: React.FC<AdvancedCalendarViewProps> = ({
                 </p>
               </div>
 
-              <div className="pt-2 border-t border-[#F3F2F1] flex gap-2">
+              <div className="pt-2 border-t border-[#F3F2F1] flex flex-wrap gap-2">
                 <button
+                  type="button"
                   onClick={() => {
                     if (onOpenAIChatWithPrompt) {
                       onOpenAIChatWithPrompt(`Nipe ushauri wa utekelezaji bora wa tukio hili: ${selectedEvent.title}.`);
                     }
                   }}
-                  className="flex-1 py-2 rounded-lg bg-[#6264A7] hover:bg-[#555793] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs"
+                  className="flex-1 min-w-[120px] py-2 rounded-lg bg-[#6264A7] hover:bg-[#555793] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                   <span>AI Execution Advice</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteEvent(selectedEvent.id)}
+                  className="px-3 py-2 rounded-lg border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-50 cursor-pointer"
+                >
+                  {isSw ? 'Futa' : 'Delete'}
                 </button>
               </div>
             </div>

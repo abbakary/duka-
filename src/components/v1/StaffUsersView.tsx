@@ -58,6 +58,7 @@ import type {
 
 type PeopleTab =
   | 'dashboard'
+  | 'overview'
   | 'directory'
   | 'recruitment'
   | 'timeoff'
@@ -291,13 +292,55 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
     );
   }
 
-  const topNav: Array<{ id: PeopleTab; label: string }> = [
-    { id: 'dashboard', label: isSw ? 'Dashibodi' : 'Dashboard' },
-    { id: 'directory', label: isSw ? 'Wafanyakazi' : 'Employees' },
-    { id: 'recruitment', label: isSw ? 'Kuajiri' : 'Recruitment' },
-    { id: 'payroll', label: isSw ? 'Mishahara' : 'Payroll' },
-    { id: 'timeoff', label: isSw ? 'Likizo' : 'Time off' },
-    { id: 'reporting', label: isSw ? 'Ripoti' : 'Reporting' },
+  const sectionCards: Array<{
+    id: PeopleTab;
+    label: string;
+    hint: string;
+    icon: React.ReactNode;
+    accent: string;
+  }> = [
+    {
+      id: 'directory',
+      label: isSw ? 'Wafanyakazi' : 'Employees',
+      hint: isSw ? 'Ongeza, hariri, angalia wasifu' : 'Add, edit, view profiles',
+      icon: <Users className="w-5 h-5" />,
+      accent: 'bg-[#107C10]',
+    },
+    {
+      id: 'payroll',
+      label: isSw ? 'Mishahara' : 'Payroll',
+      hint: isSw ? 'PAYE, NSSF, slip za mshahara' : 'PAYE, NSSF, payslips',
+      icon: <Banknote className="w-5 h-5" />,
+      accent: 'bg-[#714b67]',
+    },
+    {
+      id: 'timeoff',
+      label: isSw ? 'Likizo' : 'Time off',
+      hint: isSw ? 'Maombi na idhini' : 'Requests & approvals',
+      icon: <CalendarOff className="w-5 h-5" />,
+      accent: 'bg-[#6264A7]',
+    },
+    {
+      id: 'recruitment',
+      label: isSw ? 'Kuajiri' : 'Recruitment',
+      hint: isSw ? 'Mwombaji na kuajiri' : 'Applicants & hiring',
+      icon: <UserPlus className="w-5 h-5" />,
+      accent: 'bg-sky-600',
+    },
+    {
+      id: 'reporting',
+      label: isSw ? 'Ripoti HR' : 'HR reports',
+      hint: isSw ? 'Pakua na uchambuzi' : 'Exports & summaries',
+      icon: <BarChart3 className="w-5 h-5" />,
+      accent: 'bg-[#0F2347]',
+    },
+    {
+      id: 'overview',
+      label: isSw ? 'Muhtasari' : 'Overview',
+      hint: isSw ? 'Takwimu za timu' : 'Team snapshot',
+      icon: <LayoutDashboard className="w-5 h-5" />,
+      accent: 'bg-emerald-700',
+    },
   ];
 
   return (
@@ -329,145 +372,111 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
                   </>
                 ) : null}
                 {isSw
-                  ? 'Wafanyakazi na HR wa tawi hili tu.'
-                  : 'Staff and HR for this branch only.'}
+                  ? 'Chagua kazi moja — usichanganye skrini nyingi.'
+                  : 'Pick one task — no cluttered screens.'}
               </p>
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {canTeam && (
-            <button
-              type="button"
-              onClick={() => {
-                setTab('directory');
-                setAddOpenSignal(n => n + 1);
-              }}
-              className="px-3.5 py-2 rounded-xl bg-[#107C10] hover:bg-[#0e6b0e] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {isSw ? 'Ongeza Mfanyakazi' : 'Add Staff'}
-            </button>
-          )}
-          {onNavigate && (
-            <>
-              <button
-                type="button"
-                onClick={() => setTab('payroll')}
-                className="px-3 py-2 rounded-xl border border-[#E1DFDD] bg-white text-xs font-bold text-[#323130] hover:bg-[#F3F2F1] flex items-center gap-1.5 cursor-pointer"
-              >
-                <Banknote className="w-3.5 h-3.5 text-emerald-600" />
-                {isSw ? 'Mishahara' : 'Payroll workspace'}
-              </button>
-              {onNavigateToAccounting && (
-                <button
-                  type="button"
-                  onClick={onNavigateToAccounting}
-                  className="px-3 py-2 rounded-xl border border-[#714b67]/30 bg-[#f1e9ef] text-xs font-bold text-[#714b67] hover:bg-[#e8dce6] flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ArrowRight className="w-3.5 h-3.5" />
-                  {isSw ? 'Uhasibu' : 'Accounting'}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onNavigate('allowances')}
-                className="px-3 py-2 rounded-xl border border-[#E1DFDD] bg-white text-xs font-bold text-[#323130] hover:bg-[#F3F2F1] flex items-center gap-1.5 cursor-pointer"
-              >
-                <HandCoins className="w-3.5 h-3.5 text-amber-600" />
-                {isSw ? 'Posho' : 'Stipends'}
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigate('advances')}
-                className="px-3 py-2 rounded-xl border border-[#E1DFDD] bg-white text-xs font-bold text-[#323130] hover:bg-[#F3F2F1] flex items-center gap-1.5 cursor-pointer"
-              >
-                <CircleDollarSign className="w-3.5 h-3.5 text-sky-600" />
-                {isSw ? 'Mikopo' : 'Advances'}
-              </button>
-            </>
-          )}
-        </div>
+        {canTeam && (
+          <button
+            type="button"
+            onClick={() => {
+              setTab('directory');
+              setAddOpenSignal(n => n + 1);
+            }}
+            className="px-3.5 py-2 rounded-xl bg-[#107C10] hover:bg-[#0e6b0e] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            {isSw ? 'Ongeza Mfanyakazi' : 'Add staff'}
+          </button>
+        )}
       </header>
 
-      {(persona === 'hr' || persona === 'accountant') && (
-        <div
-          className={`rounded-xl border p-4 text-sm ${
-            persona === 'accountant'
-              ? 'border-[#038387]/35 bg-gradient-to-r from-[#e6f3f4] to-white'
-              : 'border-[#C239B3]/30 bg-gradient-to-r from-[#fdf2fb] to-white'
-          }`}
-        >
-          <p className="font-bold text-[#323130]">
-            {persona === 'accountant'
-              ? isSw
-                ? 'Mtazamo wa Mhasibu'
-                : 'Accountant workspace'
-              : isSw
-                ? 'Mtazamo wa HR'
-                : 'HR workspace'}
-          </p>
-          <p className="text-[#605E5C] mt-1 text-xs leading-relaxed">
-            {persona === 'accountant'
-              ? isSw
-                ? 'Thibitisha mizunguko, pakua PAYE/NSSF, na chapisha mishahara kwenye uhasibu. Usibadilishe wasifu wa wafanyakazi bila HR.'
-                : 'Confirm payroll runs, export PAYE/NSSF schedules, and post journals to accounting. Employee profile edits stay with HR/owner.'
-              : isSw
-                ? 'Sajili wafanyakazi, picha, TIN/NSSF, mkataba, slip za mshahara na saini ya kidijitali kabla ya kuchapisha.'
-                : 'Register staff, photos, TIN/NSSF, contracts, statutory payslips, and capture your digital signature before printing.'}
-          </p>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 max-w-md">
         <div className="bg-white rounded-xl border border-[#E1DFDD] p-4">
-          <p className="text-[11px] font-semibold text-[#605E5C]">{isSw ? 'Hai / Jumla' : 'Active / Total'}</p>
+          <p className="text-[11px] font-semibold text-[#605E5C]">{isSw ? 'Wafanyakazi hai' : 'Active staff'}</p>
           <p className="text-2xl font-black text-[#323130] mt-1">
             {activeCount}
             <span className="text-sm font-bold text-[#8A8886]"> / {staffList.length}</span>
           </p>
         </div>
         <div className="bg-white rounded-xl border border-[#E1DFDD] p-4">
-          <p className="text-[11px] font-semibold text-[#605E5C]">{isSw ? 'Zamu wazi sasa' : 'On open shift'}</p>
-          <p className="text-2xl font-black text-violet-700 mt-1">{onShiftCount}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-[#E1DFDD] p-4">
-          <p className="text-[11px] font-semibold text-[#605E5C]">{isSw ? 'Mauzo ya timu leo' : "Team sales today"}</p>
-          <p className="text-lg font-black text-emerald-700 mt-1 font-mono">{formatTSh(teamRevenueToday)}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-[#E1DFDD] p-4">
-          <p className="text-[11px] font-semibold text-[#605E5C]">{isSw ? 'Mishahara haijalipwa' : 'Unpaid this month'}</p>
+          <p className="text-[11px] font-semibold text-[#605E5C]">{isSw ? 'Mishahara haijasubiri' : 'Payroll due'}</p>
           <p className={`text-2xl font-black mt-1 ${unpaidPayrollCount ? 'text-rose-600' : 'text-emerald-700'}`}>
             {unpaidPayrollCount}
           </p>
         </div>
       </div>
 
-      {tab !== 'payroll' && (
-        <nav className="flex overflow-x-auto whitespace-nowrap gap-5 items-center rounded-lg bg-[#714b67] px-4 h-11 text-white text-sm sticky top-0 z-[5]">
-          <span className="font-medium shrink-0">{isSw ? 'Watu' : 'People'}</span>
-          {topNav.map(t => (
+      {tab === 'dashboard' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {sectionCards.map(card => (
             <button
-              key={t.id}
+              key={card.id}
               type="button"
-              onClick={() => setTab(t.id)}
-              className={`shrink-0 border-0 bg-transparent py-3 cursor-pointer ${
-                tab === t.id ? 'opacity-100 shadow-[inset_0_-2px_0_#fff]' : 'opacity-85 hover:opacity-100'
-              }`}
+              onClick={() => setTab(card.id)}
+              className="text-left rounded-2xl border border-[#E1DFDD] bg-white p-4 shadow-sm hover:shadow-md hover:border-[#6264A7]/30 transition-all cursor-pointer"
             >
-              {t.label}
+              <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl text-white ${card.accent}`}>
+                {card.icon}
+              </span>
+              <h2 className="mt-3 text-sm font-bold text-[#323130]">{card.label}</h2>
+              <p className="mt-1 text-xs text-[#605E5C]">{card.hint}</p>
             </button>
           ))}
+          {onNavigate && (
+            <>
+              <button
+                type="button"
+                onClick={() => onNavigate('allowances')}
+                className="text-left rounded-2xl border border-[#E1DFDD] bg-white p-4 shadow-sm hover:shadow-md cursor-pointer"
+              >
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-white bg-amber-600">
+                  <HandCoins className="w-5 h-5" />
+                </span>
+                <h2 className="mt-3 text-sm font-bold text-[#323130]">{isSw ? 'Posho' : 'Stipends'}</h2>
+                <p className="mt-1 text-xs text-[#605E5C]">{isSw ? 'Madai ya chakula/usafiri' : 'Daily food & transport'}</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('advances')}
+                className="text-left rounded-2xl border border-[#E1DFDD] bg-white p-4 shadow-sm hover:shadow-md cursor-pointer"
+              >
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-white bg-sky-600">
+                  <CircleDollarSign className="w-5 h-5" />
+                </span>
+                <h2 className="mt-3 text-sm font-bold text-[#323130]">{isSw ? 'Mikopo' : 'Advances'}</h2>
+                <p className="mt-1 text-xs text-[#605E5C]">{isSw ? 'Maombi ya mshahara mapema' : 'Salary advance requests'}</p>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab !== 'dashboard' && tab !== 'payroll' && (
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setTab('compensation')}
-            className={`shrink-0 border-0 bg-transparent py-3 cursor-pointer ml-auto text-xs ${
-              tab === 'compensation' ? 'opacity-100 underline' : 'opacity-75'
-            }`}
+            onClick={() => setTab('dashboard')}
+            className="text-xs font-bold text-[#6264A7] hover:underline cursor-pointer"
           >
-            {isSw ? 'Posho & viwango' : 'Stipends & rates'}
+            ← {isSw ? 'Rudi kwenye kadi' : 'Back to menu'}
           </button>
-        </nav>
+          <span className="text-xs text-[#605E5C]">
+            · {sectionCards.find(c => c.id === tab)?.label ?? tab}
+          </span>
+        </div>
+      )}
+
+      {(tab === 'payroll' || tab === 'overview') && (
+        <button
+          type="button"
+          onClick={() => setTab('dashboard')}
+          className="text-xs font-bold text-[#6264A7] hover:underline cursor-pointer"
+        >
+          ← {isSw ? 'Rudi kwenye kadi' : 'Back to menu'}
+        </button>
       )}
 
       {tab === 'payroll' && canPay && (
@@ -501,7 +510,7 @@ export const StaffUsersView: React.FC<StaffUsersViewProps> = ({
         </p>
       )}
 
-      {tab === 'dashboard' && (
+      {tab === 'overview' && (
         <div className="space-y-4">
           <HrOdooDashboard
             language={language}

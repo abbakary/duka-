@@ -1,26 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
   ArrowRight,
   BarChart3,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Play,
   Smartphone,
   Store,
   Zap,
 } from 'lucide-react';
 import type { BusinessType, Language, SaaSPlanTier, UserRole } from '@/types/v1';
-import {
-  DEFAULT_SHOWCASE_ITEMS,
-  fetchPublicShowcase,
-  type PlatformShowcaseItem,
-} from '@/lib/platformShowcase';
+import { landingFeaturedDemo, type PlatformShowcaseItem } from '@/lib/platformShowcase';
 import { useSaasPlans } from '@/context/SaasPlansContext';
 import { usePlatformBilling } from '@/context/PlatformBillingContext';
 import { formatPlanPrice, planBranchLabel, planFeatures, planPeriod } from '@/lib/saasPlans';
 import { SubscriptionPayContactCard } from '@/components/v1/SubscriptionPayContactCard';
 import { BrandLogo } from '@/components/ui/BrandLogo';
+import { BRAND_DEMO_VIDEO_FALLBACK, BRAND_DEMO_VIDEO_URL } from '@/lib/brandAssets';
 
 export interface LandingPageViewProps {
   language: Language;
@@ -32,29 +27,21 @@ export interface LandingPageViewProps {
 
 const TEAL = '#0d9488';
 
+function resolveDemoVideoSrc(): string {
+  return BRAND_DEMO_VIDEO_URL || BRAND_DEMO_VIDEO_FALLBACK;
+}
+
 function ShowcaseMedia({ item, className = '' }: { item: PlatformShowcaseItem; className?: string }) {
   if (item.mediaType === 'video') {
-    const isEmbed = item.mediaUrl.includes('youtube.com') || item.mediaUrl.includes('youtu.be');
-    if (isEmbed) {
-      const embedUrl = item.mediaUrl.includes('embed')
-        ? item.mediaUrl
-        : item.mediaUrl.replace('watch?v=', 'embed/');
-      return (
-        <iframe
-          title={item.title}
-          src={`${embedUrl}?rel=0&modestbranding=1`}
-          className={`w-full aspect-video rounded-2xl border border-slate-200 bg-slate-900 ${className}`}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        />
-      );
-    }
     return (
       <video
+        key={resolveDemoVideoSrc()}
         controls
+        playsInline
+        preload="metadata"
         poster={item.thumbnailUrl ?? undefined}
         className={`w-full aspect-video rounded-2xl border border-slate-200 bg-slate-900 object-cover ${className}`}
-        src={item.mediaUrl}
+        src={resolveDemoVideoSrc()}
       />
     );
   }
@@ -62,7 +49,7 @@ function ShowcaseMedia({ item, className = '' }: { item: PlatformShowcaseItem; c
     <img
       src={item.mediaUrl}
       alt={item.title}
-      className={`w-full aspect-[16/10] object-cover rounded-2xl border border-slate-200 ${className}`}
+      className={`w-full aspect-[16/10] object-contain bg-white p-4 rounded-2xl border border-slate-200 ${className}`}
     />
   );
 }
@@ -77,21 +64,7 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
   const isSw = language === 'sw';
   const { plans } = useSaasPlans();
   const { settings: billingSettings } = usePlatformBilling();
-  const [showcase, setShowcase] = useState<PlatformShowcaseItem[]>(DEFAULT_SHOWCASE_ITEMS);
-  const [galleryIndex, setGalleryIndex] = useState(0);
-
-  useEffect(() => {
-    void fetchPublicShowcase().then(setShowcase);
-  }, []);
-
-  const featured = useMemo(
-    () => showcase.find(s => s.isFeatured) ?? showcase[0],
-    [showcase],
-  );
-  const gallery = useMemo(
-    () => showcase.filter(s => !s.isFeatured || s.id !== featured?.id),
-    [showcase, featured],
-  );
+  const featured = useMemo(() => landingFeaturedDemo(isSw), [isSw]);
 
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
@@ -181,28 +154,16 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
             </div>
           </div>
 
-          {/* Floating POS preview cards */}
-          <div className="relative hidden lg:block h-[420px]">
-            <div className="absolute top-0 right-8 w-64 bg-white rounded-2xl border border-slate-200 shadow-xl p-4 animate-in fade-in">
-              <div className="text-[10px] font-bold uppercase text-teal-700 tracking-wide">{isSw ? 'Mauzo leo' : 'Today\'s sales'}</div>
-              <div className="text-2xl font-black mt-1">TZS 2.4M</div>
-              <div className="text-xs text-emerald-600 font-semibold mt-1">+18% {isSw ? 'kuliko jana' : 'vs yesterday'}</div>
-            </div>
-            <div className="absolute top-28 left-4 w-72 bg-white rounded-2xl border border-slate-200 shadow-xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center">
-                  <Store className="w-5 h-5 text-teal-700" />
-                </div>
-                <div>
-                  <div className="font-bold text-sm">{isSw ? 'POS — Haraka' : 'Fast POS checkout'}</div>
-                  <div className="text-xs text-slate-500">{isSw ? 'M-Pesa, mkopo, stoo' : 'M-Pesa, credit, stock sync'}</div>
-                </div>
-              </div>
-            </div>
-            <div className="absolute bottom-8 right-0 w-56 bg-teal-700 text-white rounded-2xl shadow-xl p-4">
-              <CheckCircle2 className="w-5 h-5 mb-2 opacity-90" />
-              <div className="text-sm font-bold">{isSw ? 'Risiti TRA imetumwa' : 'TRA receipt issued'}</div>
-              <div className="text-xs opacity-80 mt-1">RCP-20260831-A1B2</div>
+          <div className="relative hidden lg:block">
+            <video
+              controls
+              playsInline
+              preload="metadata"
+              className="w-full rounded-2xl border border-slate-200 shadow-xl bg-slate-900 aspect-video object-cover"
+              src={resolveDemoVideoSrc()}
+            />
+            <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-bold pointer-events-none">
+              <Play className="w-3.5 h-3.5" /> {isSw ? 'Onyesha Duka+' : 'Watch Duka+'}
             </div>
           </div>
         </div>
@@ -265,58 +226,6 @@ export const LandingPageView: React.FC<LandingPageViewProps> = ({
                 >
                   {isSw ? 'Jaribu sasa' : 'Try it now'} <ArrowRight className="w-4 h-4" />
                 </button>
-              </div>
-            </div>
-          )}
-
-          {gallery.length > 0 && (
-            <div className="mt-14">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500 mb-4">
-                {isSw ? 'Vipengele & mafunzo' : 'Features & tutorials'}
-              </h3>
-              <div className="relative">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {gallery.slice(galleryIndex, galleryIndex + 3).map(item => (
-                    <a
-                      key={item.id}
-                      href={item.linkUrl ?? '#'}
-                      onClick={e => { if (!item.linkUrl) e.preventDefault(); }}
-                      className="group rounded-2xl border border-slate-200 bg-white overflow-hidden hover:shadow-md transition-shadow"
-                    >
-                      {item.mediaType === 'video' ? (
-                        <div className="relative">
-                          <ShowcaseMedia item={item} className="rounded-none border-0" />
-                        </div>
-                      ) : (
-                        <img src={item.mediaUrl} alt={item.title} className="w-full aspect-[16/10] object-cover" />
-                      )}
-                      <div className="p-4">
-                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-teal-700">{item.title}</h4>
-                        {item.subtitle && <p className="text-xs text-slate-500 mt-1 line-clamp-2">{item.subtitle}</p>}
-                      </div>
-                    </a>
-                  ))}
-                </div>
-                {gallery.length > 3 && (
-                  <div className="flex justify-center gap-2 mt-6">
-                    <button
-                      type="button"
-                      onClick={() => setGalleryIndex(i => Math.max(0, i - 1))}
-                      disabled={galleryIndex === 0}
-                      className="p-2 rounded-full border border-slate-200 disabled:opacity-40 cursor-pointer"
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGalleryIndex(i => Math.min(gallery.length - 3, i + 1))}
-                      disabled={galleryIndex >= gallery.length - 3}
-                      className="p-2 rounded-full border border-slate-200 disabled:opacity-40 cursor-pointer"
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}

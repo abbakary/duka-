@@ -1,5 +1,6 @@
 import React from 'react';
-import { MessageCircle, Phone, Smartphone } from 'lucide-react';
+import { Phone, Smartphone } from 'lucide-react';
+import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import {
   billingWhatsAppMessage,
   whatsappMeLink,
@@ -55,7 +56,7 @@ export const SubscriptionPayContactCard: React.FC<Props> = ({
           compact ? 'px-3 py-2 text-[11px]' : 'px-4 py-2.5 text-xs'
         }`}
       >
-        <MessageCircle className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+        <WhatsAppIcon className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
         {isSw ? `Wasiliana WhatsApp · ${settings.whatsappNumber}` : `Contact WhatsApp · ${settings.whatsappNumber}`}
       </a>
 

@@ -4,6 +4,9 @@
   "version": "4.0.0",
   "type": "module",
   "scripts": {
+    "sync:brand": "node scripts/sync-brand-public.mjs",
+    "predev": "node scripts/sync-brand-public.mjs",
+    "prebuild": "node scripts/sync-brand-public.mjs",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
