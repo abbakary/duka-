@@ -13,6 +13,7 @@ import type {
   SalesVatSummary,
 } from '@/lib/standardReports';
 import { formatPeriodLabel } from '@/lib/standardReports';
+import { vatReportLabels } from '@/lib/taxComplianceSettings';
 
 function esc(s: string): string {
   return String(s ?? '')
@@ -187,10 +188,11 @@ export function renderSalesDetailPaper(opts: {
   isSw: boolean;
 }): string {
   const { company, period, rows, totals, isSw } = opts;
+  const L = vatReportLabels(isSw);
   // Compact A4 landscape columns — everything stays on one horizontal line per row
   const headers = isSw
-    ? ['#', 'Risiti', 'Tarehe / Saa', 'Mteja', 'Bidhaa', 'Malipo', 'Neto', 'VAT', 'Jumla']
-    : ['#', 'Receipt', 'Date / Time', 'Customer', 'Items', 'Pay', 'Net', 'VAT', 'Gross'];
+    ? ['#', 'Risiti', 'Tarehe / Saa', 'Mteja', 'Bidhaa', 'Malipo', L.net, L.vat, L.gross]
+    : ['#', 'Receipt', 'Date / Time', 'Customer', 'Items', 'Pay', L.net, L.vat, L.gross];
   const tableRows = rows.map(r => [
     String(r.serial),
     esc(r.receipt),
@@ -216,9 +218,9 @@ export function renderSalesDetailPaper(opts: {
     )}
     ${kpiStrip([
       { label: isSw ? 'Risiti' : 'Receipts', value: String(rows.length) },
-      { label: isSw ? 'Neto' : 'Net Sales', value: money(totals.net) },
-      { label: isSw ? 'VAT' : 'VAT', value: money(totals.vat) },
-      { label: isSw ? 'Jumla ya Mauzo' : 'Gross Sales', value: money(totals.gross) },
+      { label: L.net, value: money(totals.net) },
+      { label: L.vat, value: money(totals.vat) },
+      { label: L.gross, value: money(totals.gross) },
     ])}
     ${tableHtml(headers, tableRows, isSw ? 'Hakuna mauzo katika kipindi hiki.' : 'No sales in this period.', {
       compact: true,
@@ -236,12 +238,13 @@ export function renderSalesVatSummaryPaper(opts: {
   isSw: boolean;
 }): string {
   const { company, period, summary, isSw } = opts;
+  const L = vatReportLabels(isSw);
   const vatHeaders = isSw
-    ? ['Kodi', 'Maelezo', 'Risiti', 'Neto', 'VAT', 'Jumla']
-    : ['Code', 'Description', 'Receipts', 'Net', 'VAT', 'Gross'];
+    ? ['Kodi', 'Maelezo', 'Risiti', L.net, L.vat, L.gross]
+    : ['Code', 'Description', 'Receipts', L.net, L.vat, L.gross];
   const vatRows = summary.buckets.map(b => [
     esc(b.code),
-    esc(isSw && b.code === 'A' ? 'VAT ya kawaida 18%' : b.label),
+    esc(b.code === 'A' ? L.bucketA : b.code === 'E' ? L.bucketE : b.label),
     String(b.receiptCount),
     money(b.net),
     money(b.vat),
@@ -268,10 +271,11 @@ export function renderSalesVatSummaryPaper(opts: {
     )}
     ${kpiStrip([
       { label: isSw ? 'Risiti' : 'Receipts', value: String(summary.receiptCount) },
-      { label: isSw ? 'Neto' : 'Net', value: money(summary.totalNet) },
-      { label: isSw ? 'VAT' : 'VAT', value: money(summary.totalVat) },
-      { label: isSw ? 'Jumla' : 'Gross', value: money(summary.totalGross) },
+      { label: L.net, value: money(summary.totalNet) },
+      { label: L.vat, value: money(summary.totalVat) },
+      { label: L.gross, value: money(summary.totalGross) },
     ])}
+    <div style="font-size:10px;color:#6B7280;margin:0 0 8px">${esc(L.grossHint)}</div>
     <div style="font-size:11px;font-weight:700;color:#374151;margin:4px 0 6px">${isSw ? 'Jumla za VAT' : 'VAT Totals'}</div>
     ${tableHtml(vatHeaders, vatRows, isSw ? 'Hakuna data.' : 'No data.', { moneyCols: [3, 4, 5] })}
     <div style="font-size:11px;font-weight:700;color:#374151;margin:16px 0 6px">${isSw ? 'Malipo' : 'Payments'}</div>

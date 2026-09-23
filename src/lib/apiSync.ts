@@ -248,9 +248,10 @@ export function mapCustomer(c: Record<string, unknown>): Customer {
     loyaltyPoints: (c.loyalty_points as number) ?? 0,
     riskScore: 'Low',
     dunningStage: (c.dunning_stage as Customer['dunningStage']) ?? 'cleared',
-    daysOverdue: 0,
-    lastPurchaseDate: '',
-    totalPurchases: 0,
+    daysOverdue: Number(c.days_overdue ?? 0) || 0,
+    lastPurchaseDate: String(c.last_purchase_date ?? '').slice(0, 10),
+    totalPurchases: Number(c.total_purchases ?? 0) || 0,
+    notes: (c.notes as string) ?? undefined,
     avatarColor: 'bg-brand-600',
   };
 }

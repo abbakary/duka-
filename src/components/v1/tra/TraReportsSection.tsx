@@ -13,6 +13,7 @@ import {
   traReportMetaFromSettings,
 } from '@/lib/traFiscalReportPaper';
 import { periodFromPreset, type ReportDatePreset } from '@/lib/standardReports';
+import { vatReportLabels } from '@/lib/taxComplianceSettings';
 
 interface TraReportsSectionProps {
   language: Language;
@@ -35,6 +36,7 @@ export const TraReportsSection: React.FC<TraReportsSectionProps> = ({
   activeBranch,
 }) => {
   const isSw = language === 'sw';
+  const vatL = vatReportLabels(isSw);
   const { receipts, efdSettings, refreshReceipts, receiptsLoading } = useTraReceipts();
   const { settings: taxSettings } = useTaxCompliance();
   const { config: docConfig } = useDocumentTemplates();
@@ -184,13 +186,14 @@ export const TraReportsSection: React.FC<TraReportsSectionProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 min-w-0">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 min-w-0">
         {[
           { label: isSw ? 'Risiti (kipindi)' : 'Receipts (period)', value: String(stats.count) },
           { label: isSw ? 'Zilizotolewa' : 'Issued', value: String(stats.issued), tone: 'text-emerald-700' },
           { label: isSw ? 'Zilizoshindwa' : 'Failed', value: String(stats.failed), tone: 'text-red-700' },
-          { label: isSw ? 'Jumla VAT' : 'Total VAT', value: formatTSh(stats.totalVat), tone: 'text-[#E65100]' },
-          { label: isSw ? 'Jumla mauzo' : 'Gross sales', value: formatTSh(stats.totalSales), tone: 'text-[#323130]' },
+          { label: vatL.net, value: formatTSh(stats.totalNet), tone: 'text-[#0078D4]' },
+          { label: vatL.vat, value: formatTSh(stats.totalVat), tone: 'text-[#E65100]' },
+          { label: vatL.gross, value: formatTSh(stats.totalSales), tone: 'text-[#323130]' },
         ].map(c => (
           <div key={c.label} className="bg-white rounded-xl border border-[#E1DFDD] p-4 shadow-xs min-w-0">
             <div className="text-[10px] font-bold uppercase text-[#605E5C] truncate">{c.label}</div>
@@ -214,9 +217,9 @@ export const TraReportsSection: React.FC<TraReportsSectionProps> = ({
                 <th className="text-left px-3 py-2 font-bold">{isSw ? 'Mteja' : 'Customer'}</th>
                 <th className="text-left px-3 py-2 font-bold">VRN / Z</th>
                 <th className="text-left px-3 py-2 font-bold">{isSw ? 'Uthibitisho' : 'Verification'}</th>
-                <th className="text-right px-3 py-2 font-bold">{isSw ? 'Neto' : 'Net'}</th>
-                <th className="text-right px-3 py-2 font-bold">VAT</th>
-                <th className="text-right px-3 py-2 font-bold">{isSw ? 'Jumla' : 'Gross'}</th>
+                <th className="text-right px-3 py-2 font-bold">{vatL.net}</th>
+                <th className="text-right px-3 py-2 font-bold">{vatL.vat}</th>
+                <th className="text-right px-3 py-2 font-bold">{vatL.gross}</th>
                 <th className="text-left px-3 py-2 font-bold">{isSw ? 'Hali' : 'Status'}</th>
               </tr>
             </thead>

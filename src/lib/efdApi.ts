@@ -8,7 +8,11 @@ import type {
   TraReceiptStatus,
 } from '@/types/traReceipt';
 import type { TaxComplianceSettings } from '@/lib/taxComplianceSettings';
-import { generateReceiptNumber, generateTraSignature } from '@/lib/taxComplianceSettings';
+import {
+  breakdownSaleAmounts,
+  generateReceiptNumber,
+  generateTraSignature,
+} from '@/lib/taxComplianceSettings';
 import { api } from '@/lib/api';
 import { traCustomerIdTypeToCode } from '@/lib/traEfdConfigMap';
 
@@ -385,9 +389,11 @@ async function buildTraReceiptRecord(opts: {
     ? await generateTraVerificationQrDataUrl(opts.verificationLink)
     : '';
 
-  const totalIncl = opts.sale.total ?? 0;
-  const totalVat = opts.sale.vatAmount ?? 0;
-  const totalExcl = Math.max(0, Math.round(totalIncl - totalVat));
+  const { gross: totalIncl, vat: totalVat, netBeforeVat: totalExcl } = breakdownSaleAmounts({
+    subtotal: opts.sale.subtotal,
+    vatAmount: opts.sale.vatAmount,
+    total: opts.sale.total,
+  });
   return {
     id: `tra-${opts.sale.id}-${Date.now()}`,
     receiptNumber: opts.receiptNumber,

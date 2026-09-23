@@ -1,7 +1,7 @@
 import { formatTSh } from '@/utils/translations';
 import type { TraReceipt } from '@/types/traReceipt';
 import type { EfdApiSettings } from '@/types/traReceipt';
-import type { TaxComplianceSettings } from '@/lib/taxComplianceSettings';
+import { vatReportLabels, type TaxComplianceSettings } from '@/lib/taxComplianceSettings';
 import { wrapReportPaper } from '@/lib/reportPaperHtml';
 
 function esc(s: string): string {
@@ -52,9 +52,10 @@ export function renderTraFiscalReportPaper(
   const successCount = issued.filter(r => r.status === 'success' || (r.isDemo && r.verificationCode)).length;
   const failedCount = issued.filter(r => r.status === 'failed').length;
 
+  const L = vatReportLabels(isSw);
   const headers = isSw
-    ? ['#', 'Risiti', 'Tarehe', 'Mteja', 'VRN', 'Z', 'Uthibitisho', 'Neto', 'VAT', 'Jumla', 'Hali']
-    : ['#', 'Receipt', 'Date', 'Customer', 'VRN', 'Z', 'Verification', 'Net', 'VAT', 'Gross', 'Status'];
+    ? ['#', 'Risiti', 'Tarehe', 'Mteja', 'VRN', 'Z', 'Uthibitisho', L.net, L.vat, L.gross, 'Hali']
+    : ['#', 'Receipt', 'Date', 'Customer', 'VRN', 'Z', 'Verification', L.net, L.vat, L.gross, 'Status'];
 
   const rows = issued.map((r, i) => [
     String(i + 1),
@@ -90,8 +91,9 @@ export function renderTraFiscalReportPaper(
         { l: isSw ? 'Risiti' : 'Receipts', v: String(issued.length) },
         { l: isSw ? 'Zilizotolewa' : 'Issued', v: String(successCount) },
         { l: isSw ? 'Zilizoshindwa' : 'Failed', v: String(failedCount) },
-        { l: isSw ? 'Jumla VAT' : 'Total VAT', v: money(totalVat) },
-        { l: isSw ? 'Jumla mauzo' : 'Gross sales', v: money(totalGross) },
+        { l: L.net, v: money(totalNet) },
+        { l: L.vat, v: money(totalVat) },
+        { l: L.gross, v: money(totalGross) },
       ]
         .map(
           k => `<div style="flex:1;min-width:100px;border:1px solid #E5E7EB;border-radius:6px;padding:8px;background:#F9FAFB">
@@ -161,7 +163,7 @@ export function renderTraFiscalReportPaper(
       ${isSw
         ? 'Ripoti ya usimamizi — si badala ya Z-Report rasmi kutoka TRA/EFD. Thibitisha kodi kwa ofisi yako ya kodi.'
         : 'Management report — not a substitute for the official EFD Z-Report. Confirm tax filings with TRA.'}
-      · Net ${money(totalNet)} · VAT ${money(totalVat)} · Gross ${money(totalGross)}
+      · ${esc(L.net)} ${money(totalNet)} · ${esc(L.vat)} ${money(totalVat)} · ${esc(L.gross)} ${money(totalGross)}
     </div>
   `;
 

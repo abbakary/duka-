@@ -1,4 +1,5 @@
 import type { SaleTransaction } from '@/types/v1';
+import { breakdownSaleAmounts } from './taxComplianceSettings';
 import { computeSaleDiscountAmount } from './saleDiscountUtils';
 import type { DocumentRenderData, DocumentType } from './documentTemplates';
 import { formatDueDateDisplay } from './dueDate';
@@ -59,7 +60,7 @@ export function saleToDocumentRenderData(
 ): DocumentRenderData {
   const isSw = options?.isSw ?? false;
   const discount = computeSaleDiscountAmount(sale);
-  const subtotalExVat = sale.subtotal ?? sale.total - sale.vatAmount;
+  const subtotalExVat = breakdownSaleAmounts(sale).netBeforeVat;
   const showDiscount = Boolean(options?.showDiscount) && discount > 0;
   return {
     documentType,

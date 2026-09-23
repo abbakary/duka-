@@ -31,6 +31,7 @@ import {
 } from '@/lib/standardReports';
 import { PageSectionHeader } from '@/components/v1/PageSectionHeader';
 import { useTaxCompliance } from '@/context/TaxComplianceContext';
+import { vatReportLabels } from '@/lib/taxComplianceSettings';
 import { BusinessPageSubtitle } from '@/lib/businessPageSubtitle';
 import {
   renderSalesDetailPaper,
@@ -125,6 +126,7 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
   activeBranch,
 }) => {
   const isSw = language === 'sw';
+  const vatL = vatReportLabels(isSw);
   const t = (key: string) => getTranslation(language, key as never);
   const { settings: taxSettings } = useTaxCompliance();
   const { config } = useDocumentTemplates();
@@ -547,16 +549,21 @@ export const ReportsAnalyticsView: React.FC<ReportsAnalyticsViewProps> = ({
               ) : (
                 <>
                   <Kpi label={isSw ? 'Risiti' : 'Receipts'} value={String(filteredSales.length)} />
-                  <Kpi label={isSw ? 'Neto' : 'Net sales'} value={formatTSh(vatSummary.totalNet)} accent="blue" />
+                  <Kpi label={vatL.net} value={formatTSh(vatSummary.totalNet)} accent="blue" />
                   <Kpi
-                    label={vatSummary.totalVat > 0 ? (isSw ? 'VAT' : 'VAT') : (isSw ? 'VAT (0)' : 'VAT (0)')}
+                    label={vatSummary.totalVat > 0 ? vatL.vat : `${vatL.vat} (0)`}
                     value={formatTSh(vatSummary.totalVat)}
                     accent="orange"
                   />
                   <Kpi
-                    label={isSw ? 'Jumla / Faida' : 'Gross / Profit'}
-                    value={`${formatTSh(vatSummary.totalGross)} · ${formatTSh(salesGrossProfit)}`}
+                    label={vatL.gross}
+                    value={formatTSh(vatSummary.totalGross)}
                     accent="green"
+                  />
+                  <Kpi
+                    label={isSw ? 'Faida (makadirio)' : 'Gross profit (est.)'}
+                    value={formatTSh(salesGrossProfit)}
+                    accent="navy"
                   />
                 </>
               )}

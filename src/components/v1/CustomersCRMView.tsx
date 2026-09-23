@@ -30,6 +30,11 @@ import { PageSectionHeader } from '@/components/v1/PageSectionHeader';
 import { useTaxCompliance } from '@/context/TaxComplianceContext';
 import { BusinessPageSubtitle } from '@/lib/businessPageSubtitle';
 import { mapCustomer, customerToApiPayload, filterByActiveBranch } from '@/lib/apiSync';
+import {
+  canIncreaseCreditLimit,
+  customerPaymentPunctuality,
+  punctualityHint,
+} from '@/lib/customerCredit';
 import type { StoreBranch } from '@/types/v1';
 import { runWithOfflineQueue } from '@/lib/offlineMutations';
 import { useOfflineStore } from '@/stores';
@@ -102,6 +107,9 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
   const [filterRisk, setFilterRisk] = useState<string>('all');
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [smsNotificationMsg, setSmsNotificationMsg] = useState<string | null>(null);
+  const [profileNotesDraft, setProfileNotesDraft] = useState('');
+  const [savingProfileNotes, setSavingProfileNotes] = useState(false);
+  const [adjustingCredit, setAdjustingCredit] = useState(false);
 
   // New Customer Form State
   const [newCustomer, setNewCustomer] = useState({
@@ -129,6 +137,10 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
     }
   }, [branchCustomers, selectedCustomerId]);
 
+  useEffect(() => {
+    setProfileNotesDraft(selectedCustomer?.notes ?? '');
+  }, [selectedCustomerId, selectedCustomer?.notes]);
+
   const filteredCustomers = branchCustomers.filter(c => {
     const email = (c.email ?? '').toLowerCase();
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -149,6 +161,7 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
       email: newCustomer.email,
       address: newCustomer.address,
       creditLimit: Number(newCustomer.creditLimit),
+      notes: newCustomer.notes,
     }, activeBranchId);
     const tempId = `local-cust-${Date.now()}`;
 
@@ -192,6 +205,7 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
           riskScore: 'Low',
           daysOverdue: 0,
           dunningStage: 'cleared',
+          notes: newCustomer.notes.trim() || undefined,
         };
         setCustomers(prev => {
           const scoped = filterByActiveBranch(prev, activeBranchId, branches);
@@ -210,18 +224,45 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
 
   // Action: Send Dunning SMS / Statement
   const handleSendReminderSMS = (cust: Customer) => {
+    const shop = currentUser?.businessName || 'Duka+';
     const msg = language === 'sw'
-      ? `Habari ${cust.name}, tunakukumbusha salio lako la mkopo katika Al-Falah Pharmacy ni ${formatTSh(cust.balance)}. Tafadhali lipa kupitia M-Pesa Lipa Namba 552099.`
-      : `Dear ${cust.name}, friendly reminder that your outstanding account balance at Al-Falah Pharmacy is ${formatTSh(cust.balance)}. Please remit via M-Pesa Till 552099.`;
+      ? `Habari ${cust.name}, tunakukumbusha salio lako la mkopo katika ${shop} ni ${formatTSh(cust.balance)}. Tafadhali lipa kupitia M-Pesa Lipa Namba 552099.`
+      : `Dear ${cust.name}, friendly reminder that your outstanding account balance at ${shop} is ${formatTSh(cust.balance)}. Please remit via M-Pesa Till 552099.`;
     
     setSmsNotificationMsg(`SMS Queued for ${cust.phone}: "${msg}"`);
     setTimeout(() => setSmsNotificationMsg(null), 6000);
   };
 
+  const minCreditLimitFor = (cust: Customer) =>
+    Math.max(50_000, Math.ceil(cust.balance ?? 0));
+
   // Action: Adjust Credit Limit
   const handleAdjustCredit = async (cust: Customer, delta: number) => {
-    const newLimit = Math.max(50000, cust.creditLimit + delta);
-    const payload = { credit_limit: newLimit };
+    if (adjustingCredit) return;
+    if (delta > 0 && !canIncreaseCreditLimit(cust)) {
+      alert(punctualityHint(cust, isSw));
+      return;
+    }
+
+    const proposed = cust.creditLimit + delta;
+    const floor = minCreditLimitFor(cust);
+    if (proposed < floor) {
+      alert(
+        isSw
+          ? `Kikomo hakiwezi kuwa chini ya ${formatTSh(floor)} (deni linalosalia au kiwango cha chini cha 50,000 TSh).`
+          : `Credit limit cannot go below ${formatTSh(floor)} (outstanding balance or 50,000 TSh minimum).`,
+      );
+      return;
+    }
+
+    const newLimit = proposed;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const deltaLabel = delta >= 0 ? `+${formatTSh(delta)}` : `−${formatTSh(Math.abs(delta))}`;
+    const auditLine = `[${stamp}] Credit limit ${deltaLabel} → ${formatTSh(newLimit)} (${customerPaymentPunctuality(cust)} punctuality).`;
+    const mergedNotes = [cust.notes?.trim(), auditLine].filter(Boolean).join('\n');
+    const payload = { credit_limit: newLimit, notes: mergedNotes };
+
+    setAdjustingCredit(true);
     try {
       const outcome = await runWithOfflineQueue({
         isOnline,
@@ -234,17 +275,74 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
         executeOnline: async () => {
           const raw = await api.updateCustomer(cust.id, payload);
           const updated = mapCustomer(raw as Record<string, unknown>);
-          setCustomers(prev => prev.map(c => c.id === cust.id ? updated : c));
+          setCustomers(prev => prev.map(c => (c.id === cust.id ? updated : c)));
+          setProfileNotesDraft(updated.notes ?? mergedNotes);
+          await onCustomersChanged?.();
         },
         onQueued: () => onQueueMutation?.('customer'),
       });
       if (outcome === 'queued') {
-        setCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, creditLimit: newLimit } : c));
+        setCustomers(prev =>
+          prev.map(c =>
+            c.id === cust.id
+              ? { ...c, creditLimit: newLimit, notes: mergedNotes }
+              : c,
+          ),
+        );
+        setProfileNotesDraft(mergedNotes);
       }
     } catch (err) {
       alert((err as Error).message);
+    } finally {
+      setAdjustingCredit(false);
     }
   };
+
+  const handleSaveProfileNotes = async () => {
+    if (!selectedCustomer || savingProfileNotes) return;
+    const trimmed = profileNotesDraft.trim();
+    const payload = { notes: trimmed || null };
+    setSavingProfileNotes(true);
+    try {
+      const outcome = await runWithOfflineQueue({
+        isOnline,
+        tenantId: storageId,
+        entity_type: 'customer',
+        entity_id: selectedCustomer.id,
+        action: 'update',
+        payload,
+        enqueue,
+        executeOnline: async () => {
+          const raw = await api.updateCustomer(selectedCustomer.id, payload);
+          const updated = mapCustomer(raw as Record<string, unknown>);
+          setCustomers(prev => prev.map(c => (c.id === selectedCustomer.id ? updated : c)));
+          setProfileNotesDraft(updated.notes ?? trimmed);
+          await onCustomersChanged?.();
+        },
+        onQueued: () => onQueueMutation?.('customer'),
+      });
+      if (outcome === 'queued') {
+        setCustomers(prev =>
+          prev.map(c =>
+            c.id === selectedCustomer.id
+              ? { ...c, notes: trimmed || undefined }
+              : c,
+          ),
+        );
+      }
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setSavingProfileNotes(false);
+    }
+  };
+
+  const selectedPunctuality = selectedCustomer
+    ? customerPaymentPunctuality(selectedCustomer)
+    : 'good';
+  const allowCreditIncrease = selectedCustomer
+    ? canIncreaseCreditLimit(selectedCustomer)
+    : false;
 
   return (
     <div className="space-y-5 pb-12">
@@ -365,10 +463,10 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#323130] mb-1">Customer Category / Notes</label>
+              <label className="block text-xs font-semibold text-[#323130] mb-1">Credit & service notes (optional)</label>
               <input
                 type="text"
-                placeholder="e.g. Chronic prescription holder, verified clinic staff"
+                placeholder="e.g. Pays weekly, wholesale buyer, VIP delivery"
                 value={newCustomer.notes}
                 onChange={e => setNewCustomer({ ...newCustomer, notes: e.target.value })}
                 className="w-full px-3 py-2 text-xs bg-[#F3F2F1] border border-[#EDEBE9] rounded-lg focus:bg-white focus:border-[#0078D4] outline-none"
@@ -589,38 +687,97 @@ export const CustomersCRMView: React.FC<CustomersCRMViewProps> = ({
 
               {/* Quick Credit Limit Adjuster */}
               <div className="p-3.5 bg-[#FAF9F8] rounded-xl border border-[#EDEBE9] flex flex-wrap items-center justify-between gap-3">
-                <div>
+                <div className="min-w-[200px] flex-1">
                   <div className="text-xs font-bold text-[#323130]">Credit Limit Controller</div>
-                  <div className="text-[11px] text-[#605E5C]">Authorize higher or lower credit bounds based on payment punctuality.</div>
+                  <div className="text-[11px] text-[#605E5C]">
+                    Authorize higher or lower credit bounds based on payment punctuality.
+                  </div>
+                  <div
+                    className={`text-[11px] mt-1 font-medium ${
+                      selectedPunctuality === 'poor'
+                        ? 'text-[#D13438]'
+                        : selectedPunctuality === 'watch'
+                          ? 'text-amber-700'
+                          : 'text-[#107C10]'
+                    }`}
+                  >
+                    {punctualityHint(selectedCustomer, isSw)}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
+                    disabled={adjustingCredit}
+                    title={isSw ? 'Punguza kikomo cha mkopo' : 'Lower credit limit'}
                     onClick={() => handleAdjustCredit(selectedCustomer, -50000)}
-                    className="px-2.5 py-1 text-xs font-bold bg-white hover:bg-rose-50 text-[#D13438] border border-rose-200 rounded-lg shadow-xs"
+                    className="px-2.5 py-1 text-xs font-bold bg-white hover:bg-rose-50 text-[#D13438] border border-rose-200 rounded-lg shadow-xs disabled:opacity-50"
                   >
                     -50k TSh
                   </button>
                   <button
+                    type="button"
+                    disabled={adjustingCredit || !allowCreditIncrease}
+                    title={
+                      allowCreditIncrease
+                        ? (isSw ? 'Ongeza kikomo' : 'Increase credit limit')
+                        : punctualityHint(selectedCustomer, isSw)
+                    }
                     onClick={() => handleAdjustCredit(selectedCustomer, 50000)}
-                    className="px-2.5 py-1 text-xs font-bold bg-white hover:bg-emerald-50 text-[#107C10] border border-emerald-200 rounded-lg shadow-xs"
+                    className="px-2.5 py-1 text-xs font-bold bg-white hover:bg-emerald-50 text-[#107C10] border border-emerald-200 rounded-lg shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     +50k TSh
                   </button>
                   <button
+                    type="button"
+                    disabled={adjustingCredit || !allowCreditIncrease}
+                    title={
+                      allowCreditIncrease
+                        ? (isSw ? 'Ongeza kikomo sana' : 'Increase credit limit significantly')
+                        : punctualityHint(selectedCustomer, isSw)
+                    }
                     onClick={() => handleAdjustCredit(selectedCustomer, 100000)}
-                    className="px-2.5 py-1 text-xs font-bold bg-[#6264A7] hover:bg-[#555793] text-white rounded-lg shadow-xs"
+                    className="px-2.5 py-1 text-xs font-bold bg-[#6264A7] hover:bg-[#555793] text-white rounded-lg shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     +100k TSh
                   </button>
                 </div>
               </div>
 
-              {/* Customer Notes & Prescription History */}
               <div>
-                <h4 className="text-xs font-bold text-[#323130] uppercase tracking-wider mb-2">Customer Profile Notes</h4>
-                <div className="p-3 bg-[#F8F8F8] rounded-lg text-xs text-[#605E5C] border border-[#EDEBE9]">
-                  {selectedCustomer.notes || 'No specific clinical or credit notes recorded yet.'}
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <h4 className="text-xs font-bold text-[#323130] uppercase tracking-wider">
+                    Customer Profile Notes
+                  </h4>
+                  <button
+                    type="button"
+                    disabled={
+                      savingProfileNotes
+                      || profileNotesDraft.trim() === (selectedCustomer.notes ?? '').trim()
+                    }
+                    onClick={() => void handleSaveProfileNotes()}
+                    className="px-3 py-1 text-xs font-semibold text-white bg-[#6264A7] hover:bg-[#555793] rounded-lg disabled:opacity-40"
+                  >
+                    {savingProfileNotes ? (isSw ? 'Inahifadhi…' : 'Saving…') : (isSw ? 'Hifadhi maelezo' : 'Save notes')}
+                  </button>
                 </div>
+                <textarea
+                  rows={4}
+                  value={profileNotesDraft}
+                  onChange={e => setProfileNotesDraft(e.target.value)}
+                  placeholder={
+                    isSw
+                      ? 'Andika maelezo ya mkopo, makubaliano ya malipo, au huduma maalum…'
+                      : 'Record credit terms, payment agreements, or service preferences…'
+                  }
+                  className="w-full p-3 bg-[#F8F8F8] rounded-lg text-xs text-[#323130] border border-[#EDEBE9] focus:bg-white focus:border-[#0078D4] outline-none resize-y min-h-[88px]"
+                />
+                {!profileNotesDraft.trim() && (
+                  <p className="text-[10px] text-[#605E5C] mt-1">
+                    {isSw
+                      ? 'Hakuna maelezo ya mkopo au huduma yaliyohifadhiwa bado.'
+                      : 'No credit or service notes recorded yet.'}
+                  </p>
+                )}
               </div>
             </div>
           ) : (

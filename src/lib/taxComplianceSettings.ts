@@ -249,7 +249,77 @@ export function calculateSaleTotals(
     ? taxableAmount
     : taxableAmount + vatAmount;
 
-  return { subtotal, discountAmount, taxableAmount, vatAmount, total };
+  /** Stored on sales & reports as "Neto" — always tax-exclusive (before VAT). */
+  const netBeforeVat =
+    isVatActive(settings) && settings.pricesIncludeVat
+      ? Math.round(taxableAmount - vatAmount)
+      : taxableAmount;
+
+  return {
+    subtotal: netBeforeVat,
+    discountAmount,
+    taxableAmount,
+    vatAmount,
+    total,
+  };
+}
+
+/** User-facing labels for VAT / Z-reports (Neto = before VAT, Jumla = incl. VAT). */
+export function vatReportLabels(isSw: boolean) {
+  return isSw
+    ? {
+        net: 'Bila VAT',
+        netHint: 'Kiasi kabla ya kodi ya VAT',
+        vat: 'VAT',
+        gross: 'Jumla (na VAT)',
+        grossHint: 'Bila VAT + VAT',
+        bucketA: 'VAT ya kawaida 18%',
+        bucketE: 'Haijatozwa / Bila VAT',
+      }
+    : {
+        net: 'Before VAT',
+        netHint: 'Tax-exclusive sales amount',
+        vat: 'VAT',
+        gross: 'Total (incl. VAT)',
+        grossHint: 'Before VAT + VAT',
+        bucketA: 'Standard VAT 18%',
+        bucketE: 'Exempt / non-VAT / zero',
+      };
+}
+
+type SaleAmountFields = {
+  subtotal?: number | null;
+  vatAmount?: number | null;
+  total?: number | null;
+};
+
+/**
+ * Normalize persisted sales for reports: net + VAT = gross.
+ * Fixes legacy rows where subtotal was saved as VAT-inclusive (same as total).
+ */
+export function breakdownSaleAmounts(sale: SaleAmountFields): {
+  netBeforeVat: number;
+  vat: number;
+  gross: number;
+} {
+  const gross = Math.round(Number(sale.total ?? 0));
+  const vat = Math.max(0, Math.round(Number(sale.vatAmount ?? 0)));
+  let net = Math.round(Number(sale.subtotal ?? 0));
+
+  if (vat > 0 && gross > 0) {
+    const netFromGross = Math.max(0, Math.round(gross - vat));
+    const ties = (a: number, b: number) => Math.abs(a - b) <= 2;
+    if (ties(net, gross) || (net > 0 && !ties(net + vat, gross))) {
+      net = netFromGross;
+    } else if (net === 0) {
+      net = netFromGross;
+    }
+  } else if (vat === 0) {
+    net = gross > 0 ? gross : Math.max(0, net);
+  }
+
+  const grossOut = gross > 0 ? gross : Math.max(0, net + vat);
+  return { netBeforeVat: net, vat, gross: grossOut };
 }
 
 export function formatVatLabel(settings: TaxComplianceSettings, isSw: boolean): string {

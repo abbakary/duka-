@@ -11,6 +11,7 @@
  */
 
 import type { Product, PurchaseOrder, SaleTransaction } from '@/types/v1';
+import { breakdownSaleAmounts, vatReportLabels } from '@/lib/taxComplianceSettings';
 
 export type StandardReportKind =
   | 'sales_detail'
@@ -213,10 +214,8 @@ function shortPoLabel(po: PurchaseOrder): string {
 export function buildSalesDetailRows(sales: SaleTransaction[]): SalesDetailRow[] {
   const sorted = [...sales].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return sorted.map((s, i) => {
-    const vat = Number(s.vatAmount || 0);
-    const gross = Number(s.total || 0);
+    const { netBeforeVat: net, vat, gross } = breakdownSaleAmounts(s);
     const discount = Number(s.discountAmount || 0);
-    const net = Math.max(0, Number(s.subtotal != null ? s.subtotal : gross - vat));
     const items = s.items || [];
     const { date, time } = splitDateTime(s.date);
     const itemSummary = items
@@ -260,10 +259,8 @@ export function buildSalesVatSummary(sales: SaleTransaction[]): SalesVatSummary 
   const payMap = new Map<string, { amount: number; count: number }>();
 
   for (const s of sales) {
-    const vat = Number(s.vatAmount || 0);
-    const gross = Number(s.total || 0);
+    const { netBeforeVat: net, vat, gross } = breakdownSaleAmounts(s);
     const discount = Number(s.discountAmount || 0);
-    const net = Math.max(0, Number(s.subtotal != null ? s.subtotal : gross - vat));
     totalNet += net;
     totalVat += vat;
     totalGross += gross;
@@ -288,7 +285,7 @@ export function buildSalesVatSummary(sales: SaleTransaction[]): SalesVatSummary 
   const buckets: SalesVatBucket[] = [
     {
       code: 'A',
-      label: 'Standard VAT 18%',
+      label: vatReportLabels(false).bucketA,
       ratePercent: 18,
       receiptCount: vatReceipts,
       net: vatNet,
@@ -297,7 +294,7 @@ export function buildSalesVatSummary(sales: SaleTransaction[]): SalesVatSummary 
     },
     {
       code: 'E',
-      label: 'Exempt / Non-VAT / Zero',
+      label: vatReportLabels(false).bucketE,
       ratePercent: 0,
       receiptCount: nonVatReceipts,
       net: nonNet,
