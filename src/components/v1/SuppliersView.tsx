@@ -59,6 +59,7 @@ import {
 import confetti from 'canvas-confetti';
 import { api } from '@/lib/api';
 import { ModalPortal } from '@/components/ui/ModalPortal';
+import { TopNoticeCard, type TopNoticePayload } from '@/components/ui/TopNoticeCard';
 import { mapSupplier, mapPurchaseOrder, mapEvent, optionalApiDate, supplierToApiPayload, eventToApiPayload, filterByActiveBranch, filterPurchaseOrdersByBranch } from '@/lib/apiSync';
 import { exportProcurementReport } from '@/utils/reportGenerator';
 import {
@@ -208,7 +209,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   const [isAddingSupplier, setIsAddingSupplier] = useState(false);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [isViewGRNModalOpen, setIsViewGRNModalOpen] = useState(false);
-  const [successToast, setSuccessToast] = useState<{ title: string; desc: string } | null>(null);
+  const [notice, setNotice] = useState<TopNoticePayload | null>(null);
 
   // New Supplier Form
   const [newSupplier, setNewSupplier] = useState({
@@ -309,10 +310,29 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
     setPoDynamicFields({ metadata: {} });
   }, [businessType, lang]);
 
-  // Helper trigger toast
+  const dismissNotice = () => setNotice(null);
+
+  const showNotice = (payload: TopNoticePayload) => {
+    setNotice(payload);
+  };
+
   const triggerToast = (title: string, desc: string) => {
-    setSuccessToast({ title, desc });
-    setTimeout(() => setSuccessToast(null), 6000);
+    showNotice({ variant: 'success', title, message: desc });
+  };
+
+  const showErrorNotice = (message: string) => {
+    showNotice({
+      variant: 'error',
+      title: t('noticeSomethingWrongTitle'),
+      message,
+    });
+  };
+
+  const focusPoProductsSection = () => {
+    setPoForm(prev => ({ ...prev, poTab: 'products' }));
+    window.requestAnimationFrame(() => {
+      document.getElementById('po-line-items-section')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   };
 
   const handleCancelPO = async (targetPO: PurchaseOrder) => {
@@ -328,7 +348,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
       setPurchaseOrders(prev => prev.map(po => po.id === targetPO.id ? { ...po, status: 'cancelled' as const } : po));
       triggerToast(isSw ? 'Agizo limefutwa' : 'Order cancelled', targetPO.supplierName);
     } catch (err) {
-      alert((err as Error).message);
+      showErrorNotice((err as Error).message);
     }
   };
 
@@ -337,7 +357,11 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   // updates supplier accounts payable, updates calendar events, and marks PO as received.
   const handleExecuteReceivePO = (targetPO: PurchaseOrder) => {
     if (targetPO.status === 'received') {
-      alert('This Purchase Order has already been received and stocked into inventory.');
+      showNotice({
+        variant: 'warning',
+        title: t('noticePoAlreadyReceivedTitle'),
+        message: t('alertPoAlreadyReceivedHint'),
+      });
       return;
     }
 
@@ -519,11 +543,19 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   const handleAddItemToPO = () => {
     if (isAddingNewCustomItem) {
       if (!customItemForm.productName) {
-        alert('Please enter a product name');
+        showNotice({
+          variant: 'warning',
+          title: t('noticeNeedProductNameTitle'),
+          message: t('alertEnterProductNameHint'),
+        });
         return;
       }
       if (!customItemForm.unit?.trim()) {
-        alert(isSw ? 'Chagua au andika kipimo' : 'Select or enter a unit');
+        showNotice({
+          variant: 'warning',
+          title: t('noticeNeedUnitTitle'),
+          message: t('alertSelectUnitHint'),
+        });
         return;
       }
 
@@ -599,7 +631,12 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   // Save / Send New Purchase Order
   const handleSavePO = async (asStatus: 'draft' | 'sent') => {
     if (poForm.items.length === 0) {
-      alert('Please add at least one line item to the purchase order.');
+      focusPoProductsSection();
+      showNotice({
+        variant: 'warning',
+        title: t('noticeNeedLineItemsTitle'),
+        message: t('alertAddPoLineItemHint'),
+      });
       return;
     }
 
@@ -683,7 +720,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         `PO ${newPO.poNumber} for ${targetSupplier.name} saved to server.`
       );
     } catch (err) {
-      alert((err as Error).message);
+      showErrorNotice((err as Error).message);
     }
   };
 
@@ -712,7 +749,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         `${createdSupplier.name} added to your supplier database.`
       );
     } catch (err) {
-      alert((err as Error).message);
+      showErrorNotice((err as Error).message);
     }
   };
 
@@ -782,16 +819,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
   return (
     <div className="space-y-6 pb-16">
-      {/* Toast Notification */}
-      {successToast && (
-        <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 shadow-sm flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-          <div>
-            <div className="font-bold text-xs">{successToast.title}</div>
-            <div className="text-[11px] text-emerald-700 mt-0.5">{successToast.desc}</div>
-          </div>
-        </div>
-      )}
+      <TopNoticeCard notice={notice} onDismiss={dismissNotice} />
 
       <PageSectionHeader
         icon={<Truck className="w-5 h-5" />}
@@ -801,12 +829,12 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
             currentUser={currentUser}
             taxSettings={taxSettings}
             isSw={isSw}
-            detail="1-Click inward stocking • PO builder • Live inventory & payables sync"
+            detail={t('suppliersHubDetail')}
           />
         }
         badge={
           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#6264A7]/10 text-[#6264A7] border border-[#6264A7]/20">
-            Connected Hub
+            {t('connectedHub')}
           </span>
         }
         toolbar={
@@ -817,14 +845,14 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#6264A7] hover:bg-[#555793] text-white text-xs font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
             >
               <PackagePlus className="w-4 h-4" />
-              <span>{isSw ? 'Ombi la Nukuu Bei (RFQ)' : 'Request for Quotation'}</span>
+              <span>{t('requestQuotation')}</span>
             </button>
             <button
               onClick={() => setIsAddingSupplier(true)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white hover:bg-[#F3F2F1] text-[#323130] text-xs font-semibold border border-[#E1DFDD] transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4 text-[#0078D4]" />
-              <span>Add Supplier</span>
+              <span>{t('addSupplier')}</span>
             </button>
           </>
         }
@@ -833,35 +861,45 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
       {/* KPI Overview Tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl p-4 border border-[#E1DFDD] shadow-xs">
-          <div className="text-xs font-medium text-[#605E5C]">Total Accounts Payable</div>
+          <div className="text-xs font-medium text-[#605E5C]">{t('totalAccountsPayable')}</div>
           <div className="text-xl font-extrabold text-[#D13438] mt-1">{formatTSh(totalPayables)}</div>
           <div className="text-[11px] text-[#605E5C] mt-1 flex items-center justify-between">
-            <span>Across {suppliers.length} suppliers</span>
+            <span>
+              {isSw
+                ? `Jumla ya wasambazaji ${suppliers.length}`
+                : `Across ${suppliers.length} ${t('acrossSuppliers')}`}
+            </span>
             <button 
               onClick={() => setIsRecordingPayment(true)}
               className="text-[#0078D4] font-bold hover:underline cursor-pointer"
             >
-              Pay Now →
+              {t('payNow')}
             </button>
           </div>
         </div>
 
         <div className="bg-white rounded-xl p-4 border border-[#E1DFDD] shadow-xs">
-          <div className="text-xs font-medium text-[#605E5C]">Pending Deliveries</div>
-          <div className="text-xl font-extrabold text-amber-600 mt-1">{pendingDeliveryCount} Orders</div>
-          <div className="text-[11px] text-[#605E5C] mt-1">Ready for 1-Click Stock-In</div>
+          <div className="text-xs font-medium text-[#605E5C]">{t('pendingDeliveries')}</div>
+          <div className="text-xl font-extrabold text-amber-600 mt-1">
+            {pendingDeliveryCount} {t('ordersLabel')}
+          </div>
+          <div className="text-[11px] text-[#605E5C] mt-1">{t('readyOneClickStockIn')}</div>
         </div>
 
         <div className="bg-white rounded-xl p-4 border border-[#E1DFDD] shadow-xs">
-          <div className="text-xs font-medium text-[#605E5C]">Received & Stocked</div>
-          <div className="text-xl font-extrabold text-[#107C10] mt-1">{receivedOrdersCount} Fulfilled</div>
-          <div className="text-[11px] text-[#107C10] font-semibold mt-1">✓ Verified in Inventory</div>
+          <div className="text-xs font-medium text-[#605E5C]">{t('receivedStocked')}</div>
+          <div className="text-xl font-extrabold text-[#107C10] mt-1">
+            {receivedOrdersCount} {t('fulfilledLabel')}
+          </div>
+          <div className="text-[11px] text-[#107C10] font-semibold mt-1">{t('verifiedInInventory')}</div>
         </div>
 
         <div className="bg-white rounded-xl p-4 border border-[#E1DFDD] shadow-xs">
-          <div className="text-xs font-medium text-[#605E5C]">Avg Delivery Lead Time</div>
-          <div className="text-xl font-extrabold text-[#6264A7] mt-1">1.8 Days</div>
-          <div className="text-[11px] text-[#107C10] font-semibold mt-1">Dar es Salaam region fast-dispatch</div>
+          <div className="text-xs font-medium text-[#605E5C]">{t('avgDeliveryLeadTime')}</div>
+          <div className="text-xl font-extrabold text-[#6264A7] mt-1">
+            1.8 {t('daysLabel')}
+          </div>
+          <div className="text-[11px] text-[#107C10] font-semibold mt-1">{t('leadTimeHint')}</div>
         </div>
       </div>
 
@@ -888,7 +926,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
           }`}
         >
           <Building2 className="w-4 h-4" />
-          <span>Suppliers Directory ({suppliers.length})</span>
+          <span>{t('suppliersDirectory')} ({suppliers.length})</span>
         </button>
 
         <button
@@ -900,7 +938,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
           }`}
         >
           <CreditCard className="w-4 h-4" />
-          <span>Supplier Payables & Payments ({supplierPayments.length})</span>
+          <span>{t('supplierPayablesPayments')} ({supplierPayments.length})</span>
         </button>
       </div>
 
@@ -918,7 +956,13 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
           }
         }}
         onExport={handleExportProcurement}
-        customAddLabel={activeSubTab === 'orders' ? '➕ Create PO' : activeSubTab === 'suppliers' ? '➕ Add Supplier' : '➕ Record Payment'}
+        customAddLabel={
+          activeSubTab === 'orders'
+            ? t('createPOShort')
+            : activeSubTab === 'suppliers'
+              ? t('addSupplierShort')
+              : t('recordPaymentShort')
+        }
         selectedCount={selectedPO ? 1 : 0}
         totalCount={activeSubTab === 'orders' ? branchPurchaseOrders.length : suppliers.length}
       />
@@ -932,7 +976,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               <Search className="w-4 h-4 text-[#605E5C] absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search PO #, supplier name, or item..."
+                placeholder={t('searchPOSupplier')}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-1.5 text-xs bg-[#F3F2F1] border border-transparent focus:border-[#0078D4] focus:bg-white rounded-lg outline-none"
@@ -946,7 +990,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   orderStatusFilter === 'all' ? 'bg-[#6264A7] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
                 }`}
               >
-                All POs ({branchPurchaseOrders.length})
+                {t('allPOs')} ({branchPurchaseOrders.length})
               </button>
               <button
                 onClick={() => setOrderStatusFilter('sent')}
@@ -954,7 +998,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   orderStatusFilter === 'sent' ? 'bg-amber-600 text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
                 }`}
               >
-                ⏳ Pending Delivery ({branchPurchaseOrders.filter(p => p.status === 'sent').length})
+                {t('pendingDeliveryFilter')} ({branchPurchaseOrders.filter(p => p.status === 'sent').length})
               </button>
               <button
                 onClick={() => setOrderStatusFilter('received')}
@@ -962,7 +1006,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   orderStatusFilter === 'received' ? 'bg-[#107C10] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
                 }`}
               >
-                ✓ Received & Stocked ({branchPurchaseOrders.filter(p => p.status === 'received').length})
+                {t('receivedStockedFilter')} ({branchPurchaseOrders.filter(p => p.status === 'received').length})
               </button>
               <button
                 onClick={() => setOrderStatusFilter('draft')}
@@ -970,7 +1014,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   orderStatusFilter === 'draft' ? 'bg-[#605E5C] text-white' : 'bg-[#F3F2F1] text-[#605E5C]'
                 }`}
               >
-                Drafts ({branchPurchaseOrders.filter(p => p.status === 'draft').length})
+                {t('poDrafts')} ({branchPurchaseOrders.filter(p => p.status === 'draft').length})
               </button>
             </div>
           </div>
@@ -990,20 +1034,20 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 </colgroup>
                 <thead className="bg-[#F8F8F8] border-b border-[#EDEBE9] text-[#605E5C] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="py-2 px-2">{isSw ? 'PO & Tarehe' : 'PO & Date'}</th>
-                    <th className="py-2 px-2">{isSw ? 'Msambazaji' : 'Supplier'}</th>
+                    <th className="py-2 px-2">{t('poAndDate')}</th>
+                    <th className="py-2 px-2">{t('suppliers')}</th>
                     <th className="py-2 px-2 hidden md:table-cell">{isSw ? 'Bidhaa' : 'Items'}</th>
                     <th className="py-2 px-2 hidden sm:table-cell">{isSw ? 'Uwasilishaji' : 'Delivery'}</th>
                     <th className="py-2 px-2 text-right">{isSw ? 'Jumla' : 'Total'}</th>
                     <th className="py-2 px-2">{isSw ? 'Hali' : 'Status'}</th>
-                    <th className="py-2 px-2 text-right">{isSw ? 'Vitendo' : 'Actions'}</th>
+                    <th className="py-2 px-2 text-right">{t('actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F3F2F1]">
                   {filteredPOs.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-10 text-xs text-[#605E5C]">
-                        No purchase orders found matching criteria.
+                        {t('noPurchaseOrdersFound')}
                       </td>
                     </tr>
                   ) : (
@@ -1028,7 +1072,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
                           <td className="py-2 px-2 hidden md:table-cell">
                             <div className="font-semibold text-[#323130]">
-                              {po.items.length} ({po.items.reduce((s, i) => s + i.quantity, 0)} {isSw ? 'vipande' : 'units'})
+                              {po.items.length} ({po.items.reduce((s, i) => s + i.quantity, 0)} {t('unitsLabel')})
                             </div>
                             <div className="text-[9px] text-[#605E5C] truncate">
                               {po.items.map(i => i.productName).join(', ')}
@@ -1047,7 +1091,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                           <td className="py-2 px-2 text-right">
                             <div className="font-extrabold text-[#323130] truncate">{formatTSh(po.totalAmount)}</div>
                             <div className="text-[9px] text-[#605E5C]">
-                              {po.paymentStatus === 'paid' ? '✓ Paid' : 'Credit'}
+                              {po.paymentStatus === 'paid' ? t('paymentPaidBadge') : t('paymentCreditBadge')}
                             </div>
                           </td>
 
@@ -1059,7 +1103,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                                 ? 'bg-amber-100 text-amber-900 border border-amber-300'
                                 : 'bg-[#EDEBE9] text-[#605E5C]'
                             }`}>
-                              {isReceived ? '✓ Received' : isPending ? '⏳ Pending' : 'Draft'}
+                              {isReceived ? t('poStatusReceived') : isPending ? t('poStatusPending') : t('poStatusDraft')}
                             </span>
                           </td>
 
@@ -1121,7 +1165,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               <Search className="w-4 h-4 text-[#605E5C] absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search supplier name or category..."
+                placeholder={t('searchSupplierCategory')}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 text-xs bg-white border border-[#E1DFDD] rounded-xl outline-none"
@@ -1156,7 +1200,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                       </div>
 
                       <div className="text-right text-xs">
-                        <div className="font-semibold text-[#605E5C]">Payable Balance</div>
+                        <div className="font-semibold text-[#605E5C]">{t('payableBalance')}</div>
                         <div className="font-extrabold text-[#D13438]">{formatTSh(sup.outstandingPayable)}</div>
                       </div>
                     </div>
@@ -1164,7 +1208,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                     <div className="mt-3 pt-3 border-t border-[#F3F2F1] flex flex-wrap items-center justify-between text-xs text-[#605E5C] gap-2">
                       <div className="flex items-center gap-4">
                         <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-[#0078D4]" /> {sup.phone}</span>
-                        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-amber-600" /> {sup.leadTimeDays} days lead time</span>
+                        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-amber-600" /> {sup.leadTimeDays} {t('daysLeadTime')}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="font-semibold px-2 py-0.5 rounded bg-[#F3F2F1] text-[#323130]">{sup.paymentTerms}</span>
@@ -1176,7 +1220,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                           }}
                           className="px-2.5 py-1 rounded bg-[#6264A7] text-white font-bold text-[11px] hover:bg-[#555793] cursor-pointer"
                         >
-                          + Order
+                          {t('orderShortBtn')}
                         </button>
                       </div>
                     </div>
@@ -1191,22 +1235,22 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
             {selectedSupplier && (
               <div className="bg-white rounded-xl border border-[#E1DFDD] p-5 shadow-xs space-y-4 sticky top-4">
                 <div className="border-b border-[#F3F2F1] pb-3">
-                  <span className="text-[10px] uppercase font-bold text-[#6264A7]">Selected Partner Profile</span>
+                  <span className="text-[10px] uppercase font-bold text-[#6264A7]">{t('selectedPartnerProfile')}</span>
                   <h3 className="text-base font-bold text-[#323130] mt-0.5">{selectedSupplier.name}</h3>
                   <p className="text-xs text-[#605E5C]">{selectedSupplier.contactPerson} • {selectedSupplier.email}</p>
                 </div>
 
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between p-2.5 rounded bg-[#FAF9F8]">
-                    <span className="text-[#605E5C]">Payment Terms:</span>
+                    <span className="text-[#605E5C]">{t('paymentTermsColon')}</span>
                     <span className="font-bold text-[#323130]">{selectedSupplier.paymentTerms}</span>
                   </div>
                   <div className="flex justify-between p-2.5 rounded bg-[#FAF9F8]">
-                    <span className="text-[#605E5C]">Lead Time:</span>
-                    <span className="font-bold text-[#323130]">{selectedSupplier.leadTimeDays} Business Days</span>
+                    <span className="text-[#605E5C]">{t('leadTimeColon')}</span>
+                    <span className="font-bold text-[#323130]">{selectedSupplier.leadTimeDays} {t('businessDays')}</span>
                   </div>
                   <div className="flex justify-between p-2.5 rounded bg-[#FAF9F8]">
-                    <span className="text-[#605E5C]">Total Outstanding Debt:</span>
+                    <span className="text-[#605E5C]">{t('totalOutstandingDebt')}</span>
                     <span className="font-bold text-[#D13438]">{formatTSh(selectedSupplier.outstandingPayable)}</span>
                   </div>
                 </div>
@@ -1220,7 +1264,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                     className="w-full py-2.5 rounded-xl bg-[#6264A7] hover:bg-[#555793] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                   >
                     <PackagePlus className="w-4 h-4" />
-                    <span>Create Purchase Order</span>
+                    <span>{t('createPurchaseOrder')}</span>
                   </button>
 
                   <button
@@ -1231,7 +1275,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                     className="w-full py-2.5 rounded-xl bg-white hover:bg-[#F3F2F1] text-[#323130] border border-[#E1DFDD] font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
                   >
                     <CreditCard className="w-4 h-4 text-[#0078D4]" />
-                    <span>Record Payment Settlement</span>
+                    <span>{t('recordPaymentSettlement')}</span>
                   </button>
                 </div>
               </div>
@@ -1245,15 +1289,15 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         <div className="space-y-4">
           <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-[#E1DFDD] shadow-xs">
             <div>
-              <h3 className="font-bold text-sm text-[#323130]">Supplier Settlement History & Outward Payments</h3>
-              <p className="text-xs text-[#605E5C]">Tracks Bank Transfers, M-Pesa, and Cash remittances to distributors</p>
+              <h3 className="font-bold text-sm text-[#323130]">{t('supplierSettlementHistory')}</h3>
+              <p className="text-xs text-[#605E5C]">{t('supplierSettlementSub')}</p>
             </div>
             <button
               onClick={() => setIsRecordingPayment(true)}
               className="px-4 py-2 rounded-lg bg-[#6264A7] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Record New Payment</span>
+              <span>{t('recordNewPayment')}</span>
             </button>
           </div>
 
@@ -1284,7 +1328,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 {supplierPayments.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center py-8 text-xs text-[#605E5C]">
-                      No supplier payments recorded yet.
+                      {t('noSupplierPaymentsYet')}
                     </td>
                   </tr>
                 ) : (
@@ -1484,7 +1528,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
             {poForm.poTab === 'products' && (
             <>
-            <div className="p-4 rounded-xl border border-[#E65100]/30 bg-orange-50/50 space-y-3">
+            <div id="po-line-items-section" className="p-4 rounded-xl border border-[#E65100]/30 bg-orange-50/50 space-y-3">
                 <div className="flex items-start gap-2">
                   <ShieldCheck className="w-4 h-4 text-[#E65100] mt-0.5 shrink-0" />
                   <div>
@@ -1929,7 +1973,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   onClick={() => handleSavePO('draft')}
                   className="px-4 py-2 rounded-lg text-xs font-semibold text-[#323130] bg-white border border-[#C8C6C4] hover:bg-[#F3F2F1] cursor-pointer"
                 >
-                  Save as Draft
+                  {t('saveAsDraft')}
                 </button>
                 <button
                   type="button"
@@ -1951,7 +1995,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-[#6264A7]" />
                 <div>
-                  <h3 className="font-bold text-base text-[#323130]">{selectedPO.poNumber} — Goods Received Note</h3>
+                  <h3 className="font-bold text-base text-[#323130]">{selectedPO.poNumber} {t('grnTitleSuffix')}</h3>
                   <p className="text-[11px] text-[#605E5C]">{selectedPO.supplierName}</p>
                 </div>
               </div>
@@ -1962,15 +2006,15 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-3 bg-[#FAF9F8] rounded-xl border border-[#EDEBE9]">
               <div>
-                <div className="text-[#605E5C]">Status:</div>
+                <div className="text-[#605E5C]">{t('statusColon')}</div>
                 <div className="font-bold text-[#323130] uppercase">{selectedPO.status}</div>
               </div>
               <div>
-                <div className="text-[#605E5C]">Order Date:</div>
+                <div className="text-[#605E5C]">{t('orderDateColon')}</div>
                 <div className="font-mono text-[#323130]">{selectedPO.dateCreated}</div>
               </div>
               <div>
-                <div className="text-[#605E5C]">Payment Terms:</div>
+                <div className="text-[#605E5C]">{t('paymentTermsColon')}</div>
                 <div className="font-bold text-[#323130]">{selectedPO.paymentTerms}</div>
               </div>
               <div>
@@ -1993,10 +2037,10 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               <table className="w-full text-left text-xs">
                 <thead className="bg-[#F8F8F8] text-[#605E5C] font-bold">
                   <tr>
-                    <th className="py-2 px-3">Product</th>
-                    <th className="py-2 px-3">Qty</th>
-                    <th className="py-2 px-3">Cost Price</th>
-                    <th className="py-2 px-3 text-right">Total</th>
+                    <th className="py-2 px-3">{isSw ? 'Bidhaa' : 'Product'}</th>
+                    <th className="py-2 px-3">{t('qtyLabel')}</th>
+                    <th className="py-2 px-3">{t('costPriceLabel')}</th>
+                    <th className="py-2 px-3 text-right">{isSw ? 'Jumla' : 'Total'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F3F2F1]">
@@ -2018,7 +2062,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 className="px-3 py-1.5 rounded-lg border border-[#C8C6C4] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                <span>Print GRN</span>
+                <span>{t('printGRN')}</span>
               </button>
 
               {selectedPO.status === 'sent' && (
@@ -2030,7 +2074,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   className="px-4 py-2 rounded-lg bg-[#107C10] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
                   <PackagePlus className="w-4 h-4" />
-                  <span>Receive & Stock In Now</span>
+                  <span>{t('receiveStockInNow')}</span>
                 </button>
               )}
             </div>
@@ -2043,7 +2087,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         <div className="fixed inset-0 z-[200] bg-black/50 flex items-start justify-center p-4 overflow-y-auto">
           <form onSubmit={handleSaveNewSupplier} className="bg-white rounded-2xl max-w-md w-full border border-[#E1DFDD] shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-[#EDEBE9] pb-3">
-              <h3 className="font-bold text-sm text-[#323130]">Register New Supplier</h3>
+              <h3 className="font-bold text-sm text-[#323130]">{t('registerNewSupplier')}</h3>
               <button type="button" onClick={() => setIsAddingSupplier(false)} className="text-[#605E5C]">
                 <X className="w-5 h-5" />
               </button>
@@ -2051,11 +2095,11 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block font-semibold text-[#323130] mb-1">Company / Supplier Name *</label>
+                <label className="block font-semibold text-[#323130] mb-1">{t('companySupplierName')}</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Zenna Pharma Supply"
+                  placeholder={t('supplierNamePlaceholder')}
                   value={newSupplier.name}
                   onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })}
                   className="w-full px-3 py-2 bg-[#F3F2F1] rounded-lg border border-[#EDEBE9] focus:bg-white outline-none"
@@ -2064,7 +2108,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-[#323130] mb-1">Contact Person</label>
+                  <label className="block font-semibold text-[#323130] mb-1">{t('contactPersonLabel')}</label>
                   <input
                     type="text"
                     value={newSupplier.contactPerson}
@@ -2073,7 +2117,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-[#323130] mb-1">Phone Number</label>
+                  <label className="block font-semibold text-[#323130] mb-1">{t('phoneNumberLabel')}</label>
                   <input
                     type="text"
                     value={newSupplier.phone}
@@ -2084,7 +2128,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-[#323130] mb-1">Payment Terms</label>
+                <label className="block font-semibold text-[#323130] mb-1">{isSw ? 'Masharti ya Malipo' : 'Payment Terms'}</label>
                 <select
                   value={newSupplier.paymentTerms}
                   onChange={e => setNewSupplier({ ...newSupplier, paymentTerms: e.target.value })}
@@ -2110,7 +2154,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 type="submit"
                 className="px-5 py-1.5 text-xs font-bold text-white bg-[#6264A7] hover:bg-[#555793] rounded-lg"
               >
-                Save Supplier
+                {t('saveSupplier')}
               </button>
             </div>
           </form>
@@ -2122,7 +2166,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         <div className="fixed inset-0 z-[200] bg-black/50 flex items-start justify-center p-4 overflow-y-auto">
           <form onSubmit={handleSavePayment} className="bg-white rounded-2xl max-w-md w-full border border-[#E1DFDD] shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-[#EDEBE9] pb-3">
-              <h3 className="font-bold text-sm text-[#323130]">Record Supplier Settlement Payment</h3>
+              <h3 className="font-bold text-sm text-[#323130]">{t('recordSupplierPaymentTitle')}</h3>
               <button type="button" onClick={() => setIsRecordingPayment(false)} className="text-[#605E5C]">
                 <X className="w-5 h-5" />
               </button>
@@ -2130,7 +2174,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block font-semibold text-[#323130] mb-1">Supplier</label>
+                <label className="block font-semibold text-[#323130] mb-1">{t('suppliers')}</label>
                 <select
                   value={paymentForm.supplierId}
                   onChange={e => setPaymentForm({ ...paymentForm, supplierId: e.target.value })}
@@ -2138,14 +2182,14 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 >
                   {suppliers.map(s => (
                     <option key={s.id} value={s.id}>
-                      {s.name} (Debt: {formatTSh(s.outstandingPayable)})
+                      {s.name} ({t('debtLabel')} {formatTSh(s.outstandingPayable)})
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block font-semibold text-[#323130] mb-1">Amount to Pay (TSh) *</label>
+                <label className="block font-semibold text-[#323130] mb-1">{t('amountToPay')}</label>
                 <input
                   type="number"
                   required
@@ -2156,7 +2200,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-[#323130] mb-1">Payment Method</label>
+                <label className="block font-semibold text-[#323130] mb-1">{t('paymentMethodLabel')}</label>
                 <select
                   value={paymentForm.paymentMethod}
                   onChange={e => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
@@ -2170,7 +2214,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-[#323130] mb-1">Transaction Ref #</label>
+                <label className="block font-semibold text-[#323130] mb-1">{t('transactionRef')}</label>
                 <input
                   type="text"
                   value={paymentForm.referenceNumber}
@@ -2192,7 +2236,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 type="submit"
                 className="px-5 py-1.5 text-xs font-bold text-white bg-[#107C10] hover:bg-[#0E6A0E] rounded-lg"
               >
-                Record Payment
+                {t('recordPaymentBtn')}
               </button>
             </div>
           </form>
